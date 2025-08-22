@@ -203,19 +203,30 @@ def generate_slide_video(steps: List[Dict], output_path: str) -> bool:
 def generate_simple_video(steps: List[Dict], output_path: str) -> bool:
     """Generate simple video using OpenCV as fallback"""
     try:
+        print("   🎬 Starting simple video generation...")
+        
         # Video settings
         width, height = 1280, 720
         fps = 30
-        duration_per_step = 3  # seconds
+        duration_per_step = 4  # seconds
         
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
         
-        # Background color (dark)
-        bg_color = (30, 30, 30)
+        if not out.isOpened():
+            print("   ❌ Failed to open video writer")
+            return False
         
-        for step in steps:
-            content = step['content']
+        # Background color (dark blue)
+        bg_color = (40, 40, 80)
+        
+        print(f"   📝 Processing {len(steps)} steps...")
+        
+        for step_idx, step in enumerate(steps):
+            content = step.get('content', 'No content')
+            step_type = step.get('type', 'text')
+            
+            print(f"   📄 Step {step_idx + 1}/{len(steps)}: {step_type}")
             
             # Create frames for this step
             frames_per_step = fps * duration_per_step
@@ -230,32 +241,53 @@ def generate_simple_video(steps: List[Dict], output_path: str) -> bool:
                 
                 # Try to load a font
                 try:
-                    font = ImageFont.truetype("arial.ttf", 36)
+                    # Try different font sizes based on content length
+                    font_size = 32 if len(content) < 100 else 28 if len(content) < 200 else 24
+                    font = ImageFont.truetype("arial.ttf", font_size)
                 except:
-                    font = ImageFont.load_default()
+                    try:
+                        font = ImageFont.load_default()
+                    except:
+                        print("   ⚠️ Using basic font rendering")
+                        font = None
                 
-                # Split text into lines
-                lines = content.split('\n')[:10]  # Limit lines
+                # Add title
+                title = f"Step {step_idx + 1}: {step_type.title()}"
+                if font:
+                    draw.text((50, 50), title, fill=(255, 255, 100), font=font)
                 
-                y_offset = 100
-                for line in lines:
-                    if len(line) > 50:
-                        # Split long lines
-                        words = line.split()
-                        current_line = ""
-                        for word in words:
-                            if len(current_line + word) < 50:
-                                current_line += word + " "
-                            else:
-                                draw.text((50, y_offset), current_line.strip(), fill=(255, 255, 255), font=font)
-                                y_offset += 50
-                                current_line = word + " "
-                        if current_line:
-                            draw.text((50, y_offset), current_line.strip(), fill=(255, 255, 255), font=font)
-                            y_offset += 50
-                    else:
-                        draw.text((50, y_offset), line, fill=(255, 255, 255), font=font)
-                        y_offset += 50
+                # Process content based on type
+                if step_type == 'equation' or 'equation' in content.lower():
+                    # Handle math equations
+                    lines = [content]  # Keep equations on single line if possible
+                    text_color = (100, 255, 100)  # Green for math
+                else:
+                    # Split text into manageable lines
+                    lines = split_text_smart(content, 60)
+                    text_color = (255, 255, 255)  # White for regular text
+                
+                y_offset = 120
+                line_height = 40
+                
+                for line_idx, line in enumerate(lines[:15]):  # Limit to 15 lines
+                    if not line.strip():
+                        continue
+                        
+                    # Clean line of special characters that might cause issues
+                    clean_line = clean_text_for_display(line)
+                    
+                    if font:
+                        draw.text((50, y_offset), clean_line, fill=text_color, font=font)
+                    y_offset += line_height
+                    
+                    if y_offset > height - 100:  # Leave space at bottom
+                        break
+                
+                # Add progress indicator
+                progress = (step_idx + 1) / len(steps)
+                progress_width = int((width - 100) * progress)
+                draw.rectangle([50, height - 50, 50 + progress_width, height - 40], 
+                             fill=(100, 200, 255))
                 
                 # Convert back to numpy array
                 frame = np.array(pil_img)
@@ -264,56 +296,221 @@ def generate_simple_video(steps: List[Dict], output_path: str) -> bool:
                 out.write(frame)
         
         out.release()
-        return True
+        
+        # Verify file was created and has content
+        if Path(output_path).exists() and Path(output_path).stat().st_size > 1000:
+            print(f"   ✅ Simple video generated: {Path(output_path).stat().st_size} bytes")
+            return True
+        else:
+            print(f"   ❌ Video file not created or too small")
+            return False
         
     except Exception as e:
-        print(f"Error generating simple video: {e}")
+        print(f"   💥 Error generating simple video: {e}")
+        import traceback
+        traceback.print_exc()
         return False
+
+    def split_text_smart(self, text: str, max_length: int) -> List[str]:
+        """Smart text splitting that preserves words and handles special characters"""
+        if not text:
+            return [""]
+            
+        # Remove or replace problematic characters
+        text = text.replace('\u2014', '-').replace('\u2013', '-')  # Em dash, en dash
+        text = text.replace('\u201c', '"').replace('\u201d', '"')  # Smart quotes
+        text = text.replace('\u2018', "'").replace('\u2019', "'")  # Smart apostrophes
+        
+        paragraphs = text.split('\n')
+        lines = []
+        
+        for paragraph in paragraphs:
+            if not paragraph.strip():
+                lines.append("")
+                continue
+                
+            words = paragraph.split()
+            current_line = ""
+            
+            for word in words:
+                if len(current_line + " " + word) <= max_length:
+                    current_line += (" " + word) if current_line else word
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = word
+            
+            if current_line:
+                lines.append(current_line)
+        
+        return lines if lines else [""]
+
+    def clean_text_for_display(self, text: str) -> str:
+        """Clean text for display, removing problematic characters"""
+        if not text:
+            return ""
+            
+        # Replace common problematic Unicode characters
+        replacements = {
+            '\u2014': '--',  # Em dash
+            '\u2013': '-',   # En dash
+            '\u201c': '"',   # Left double quote
+            '\u201d': '"',   # Right double quote
+            '\u2018': "'",   # Left single quote
+            '\u2019': "'",   # Right single quote
+            '\u2026': '...',  # Ellipsis
+            '\u00a0': ' ',   # Non-breaking space
+        }
+        
+        for unicode_char, replacement in replacements.items():
+            text = text.replace(unicode_char, replacement)
+        
+        # Remove any remaining non-ASCII characters that might cause issues
+        text = ''.join(char if ord(char) < 128 else '?' for char in text)
+        
+        return text
+
+def split_text_smart(text: str, max_length: int) -> List[str]:
+    """Smart text splitting that preserves words and handles special characters"""
+    if not text:
+        return [""]
+        
+    # Remove or replace problematic characters
+    text = text.replace('\u2014', '-').replace('\u2013', '-')  # Em dash, en dash
+    text = text.replace('\u201c', '"').replace('\u201d', '"')  # Smart quotes
+    text = text.replace('\u2018', "'").replace('\u2019', "'")  # Smart apostrophes
+    
+    paragraphs = text.split('\n')
+    lines = []
+    
+    for paragraph in paragraphs:
+        if not paragraph.strip():
+            lines.append("")
+            continue
+            
+        words = paragraph.split()
+        current_line = ""
+        
+        for word in words:
+            if len(current_line + " " + word) <= max_length:
+                current_line += (" " + word) if current_line else word
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+        
+        if current_line:
+            lines.append(current_line)
+    
+    return lines if lines else [""]
+
+def clean_text_for_display(text: str) -> str:
+    """Clean text for display, removing problematic characters"""
+    if not text:
+        return ""
+        
+    # Replace common problematic Unicode characters
+    replacements = {
+        '\u2014': '--',  # Em dash
+        '\u2013': '-',   # En dash
+        '\u201c': '"',   # Left double quote
+        '\u201d': '"',   # Right double quote
+        '\u2018': "'",   # Left single quote
+        '\u2019': "'",   # Right single quote
+        '\u2026': '...',  # Ellipsis
+        '\u00a0': ' ',   # Non-breaking space
+    }
+    
+    for unicode_char, replacement in replacements.items():
+        text = text.replace(unicode_char, replacement)
+    
+    # Remove any remaining non-ASCII characters that might cause issues
+    text = ''.join(char if ord(char) < 128 else '?' for char in text)
+    
+    return text
 
 @app.post("/generate-video", response_model=VideoResponse)
 async def generate_video(request: VideoRequest):
+    print(f"🎬 PYTHON SERVER: Received video generation request")
+    print(f"   Question: {request.question[:50]}...")
+    print(f"   Language: {request.language}")
+    print(f"   Voice: {request.voice}")
+    print(f"   Answer keys: {list(request.answer.keys()) if request.answer else 'None'}")
+    
     try:
         # Generate unique filename
         video_id = str(uuid.uuid4())
         video_filename = f"{video_id}.mp4"
         video_path = UPLOAD_DIR / video_filename
         
+        print(f"   Video ID: {video_id}")
+        print(f"   Output path: {video_path}")
+        
         steps = request.answer.get('steps', [])
         if not steps:
             # Create a single step from the text
             steps = [{'type': 'text', 'content': request.answer.get('text', 'No content available')}]
         
+        print(f"   Steps count: {len(steps)}")
+        print(f"   Steps types: {[step.get('type', 'unknown') for step in steps]}")
+        
         # Determine video type based on content
         has_math = any(step.get('type') == 'equation' for step in steps)
         has_code = any(step.get('type') == 'code' for step in steps)
+        
+        print(f"   Has math: {has_math}")
+        print(f"   Has code: {has_code}")
         
         success = False
         
         if has_math:
             # Try Manim for math content
+            print("   🎯 Attempting Manim math video generation...")
             try:
                 success = generate_math_video(steps, str(video_path))
-            except:
-                print("Manim failed, falling back to simple video")
-                success = generate_simple_video(steps, str(video_path))
+                print(f"   ✅ Manim math video: {success}")
+            except Exception as e:
+                print(f"   ❌ Manim failed: {e}")
+                print("   🔄 Falling back to simple video")
+                try:
+                    success = generate_simple_video(steps, str(video_path))
+                    print(f"   ✅ Simple video fallback: {success}")
+                except Exception as fallback_error:
+                    print(f"   ❌ Simple video fallback also failed: {fallback_error}")
+                    success = False
         else:
             # Try slide animation for non-math content
+            print("   🎯 Attempting slide animation generation...")
             try:
                 success = generate_slide_video(steps, str(video_path))
-            except:
-                print("Slide animation failed, falling back to simple video")
-                success = generate_simple_video(steps, str(video_path))
+                print(f"   ✅ Slide animation: {success}")
+            except Exception as e:
+                print(f"   ❌ Slide animation failed: {e}")
+                print("   🔄 Falling back to simple video")
+                try:
+                    success = generate_simple_video(steps, str(video_path))
+                    print(f"   ✅ Simple video fallback: {success}")
+                except Exception as fallback_error:
+                    print(f"   ❌ Simple video fallback also failed: {fallback_error}")
+                    success = False
+        
+        print(f"   📁 Video file exists: {video_path.exists()}")
         
         if success and video_path.exists():
+            result_path = f"/uploads/videos/{video_filename}"
+            print(f"   🎉 SUCCESS: Video generated at {result_path}")
             return VideoResponse(
                 success=True,
-                videoPath=f"/uploads/videos/{video_filename}"
+                videoPath=result_path
             )
         else:
+            print("   💥 FAILURE: Video generation failed")
             raise HTTPException(status_code=500, detail="Video generation failed")
             
     except Exception as e:
-        print(f"Video generation error: {e}")
+        print(f"💥 PYTHON SERVER ERROR: {e}")
+        import traceback
+        traceback.print_exc()
         return VideoResponse(
             success=False,
             error=str(e)

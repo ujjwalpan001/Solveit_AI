@@ -70,23 +70,38 @@ class JobQueue {
   async processVideoGeneration(job) {
     const { questionId, question, answer, language, voice } = job.data;
     
+    console.log('🎬 JOB QUEUE: Starting video generation job');
+    console.log(`   Question ID: ${questionId}`);
+    console.log(`   Question: ${question?.substring(0, 50)}...`);
+    console.log(`   Language: ${language}`);
+    console.log(`   Voice: ${voice}`);
+    console.log(`   Answer type: ${typeof answer}`);
+    console.log(`   Answer keys: ${answer ? Object.keys(answer) : 'None'}`);
+    
     try {
       // Update question status
+      console.log('📝 JOB QUEUE: Updating question status to processing...');
       await Question.findByIdAndUpdate(questionId, {
         status: 'processing',
         processingStartedAt: new Date()
       });
 
       // Generate video
+      console.log('🎬 JOB QUEUE: Calling animation service...');
       const videoResult = await animationService.generateVideo(question, answer, {
         language,
         voice
       });
+      
+      console.log('✅ JOB QUEUE: Video generation result:', videoResult);
 
       // Generate audio
+      console.log('🔊 JOB QUEUE: Calling TTS service...');
       const audioResult = await ttsService.generateAudio(answer.text, language, voice);
+      console.log('✅ JOB QUEUE: Audio generation result:', audioResult);
 
       // Update question with results
+      console.log('📝 JOB QUEUE: Updating question with results...');
       await Question.findByIdAndUpdate(questionId, {
         status: 'completed',
         videoPath: videoResult.videoPath,
@@ -97,9 +112,9 @@ class JobQueue {
         'metadata.processingTime': Date.now() - new Date(job.createdAt).getTime()
       });
 
-      console.log(`Video generation completed for question ${questionId}`);
+      console.log(`🎉 JOB QUEUE: Video generation completed for question ${questionId}`);
     } catch (error) {
-      console.error(`Video generation failed for question ${questionId}:`, error);
+      console.error(`💥 JOB QUEUE: Video generation failed for question ${questionId}:`, error);
       throw error;
     }
   }
