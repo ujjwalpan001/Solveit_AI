@@ -62,7 +62,7 @@ function ChatInterface() {
             id: `a-${q._id}`,
             questionId: q._id,
             type: 'bot',
-            content: q.answer.text || 'No answer available',
+            content: q.answer.ans || q.answer.text || 'No answer available', // Use ans field first
             steps: q.answer.steps,
             timestamp: new Date(q.createdAt),
             subject: q.subject,
@@ -247,7 +247,7 @@ function ChatInterface() {
         const botMessage = {
           id: Date.now() + 2,
           type: 'bot',
-          content: result.question.answer.text || 'No response received',
+          content: result.question.answer.ans || result.question.answer.text || 'No response received', // Use ans field first
           timestamp: new Date(),
           subject: selectedSubject,
           questionId: result.question._id,
