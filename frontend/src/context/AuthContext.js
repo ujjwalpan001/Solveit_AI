@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useRef } from 'react';
 import { authAPI } from '../utils/api';
 import { getToken, setToken, removeToken } from '../utils/auth';
 
@@ -14,13 +14,16 @@ function authReducer(state, action) {
   console.log('AuthReducer:', action.type, action.payload);
   switch (action.type) {
     case 'SET_LOADING':
+      console.log('Setting loading to:', action.payload);
       return { ...state, loading: action.payload };
     case 'SET_USER':
       console.log('Setting user in state:', action.payload);
       return { ...state, user: action.payload, loading: false, error: null };
     case 'SET_ERROR':
+      console.log('Setting error:', action.payload);
       return { ...state, error: action.payload, loading: false };
     case 'LOGOUT':
+      console.log('Logging out user');
       return { ...state, user: null, loading: false, error: null };
     default:
       return state;
@@ -29,10 +32,18 @@ function authReducer(state, action) {
 
 export function AuthProvider({ children }) {
   const [state, dispatch] = useReducer(authReducer, initialState);
+  const initialized = useRef(false);
 
-  // Check for existing token on app start
+  // Check for existing token on app start - only once
   useEffect(() => {
+    if (initialized.current) {
+      console.log('AuthContext: Already initialized, skipping...');
+      return;
+    }
+    
+    initialized.current = true;
     console.log('AuthContext: Initial load starting...');
+    
     const token = getToken();
     if (token) {
       console.log('AuthContext: Found existing token, loading user...');
@@ -49,7 +60,7 @@ export function AuthProvider({ children }) {
       console.log('AuthContext: No token found, setting loading to false');
       dispatch({ type: 'SET_LOADING', payload: false });
     }
-  }, []);
+  }, []); // Empty dependency array to run only once
 
   const loadUser = async () => {
     try {
@@ -133,15 +144,24 @@ export function AuthProvider({ children }) {
       dispatch({ type: 'SET_LOADING', payload: true });
       const response = await authAPI.register(userData);
       
-      const { user, token } = response.data;
+      console.log('AuthContext: Register response:', response.data);
+      
+      if (!response.data.success) {
+        throw new Error(response.data.message || 'Registration failed');
+      }
+      
+      const { user, token } = response.data.data;
       setToken(token);
       dispatch({ type: 'SET_USER', payload: user });
       
       return { success: true };
     } catch (error) {
-      const message = error.response?.data?.message || 'Registration failed';
+      console.error('Registration error:', error);
+      const message = error.response?.data?.message || error.message || 'Registration failed';
       dispatch({ type: 'SET_ERROR', payload: message });
       return { success: false, error: message };
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 

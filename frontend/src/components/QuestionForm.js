@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuestions } from '../hooks/useQuestions';
-import { useAuth } from '../hooks/useAuth';
 import { toast } from 'react-toastify';
 import { MessageSquare, Video, FileText } from 'lucide-react';
 
@@ -12,7 +11,6 @@ function QuestionForm() {
     generateVideo: false
   });
   const { askQuestion, loading } = useQuestions();
-  const { user } = useAuth();
   const navigate = useNavigate();
 
   const subjects = [
@@ -162,18 +160,16 @@ function QuestionForm() {
             </div>
           </div>
 
-          {user?.preferences && (
-            <div className="bg-blue-50 rounded-lg p-4">
-              <h4 className="font-medium text-blue-900 mb-2">Your Preferences</h4>
-              <div className="text-sm text-blue-700">
-                <div>Language: {user.preferences.language === 'en' ? 'English' : 'Hindi'}</div>
-                <div>Voice: {user.preferences.voice === 'male' ? 'Male' : 'Female'}</div>
-              </div>
-              <div className="text-xs text-blue-600 mt-1">
-                You can change these in your profile settings
-              </div>
+          <div className="bg-blue-50 rounded-lg p-4">
+            <h4 className="font-medium text-blue-900 mb-2">Default Preferences</h4>
+            <div className="text-sm text-blue-700">
+              <div>Language: English</div>
+              <div>Voice: Female</div>
             </div>
-          )}
+            <div className="text-xs text-blue-600 mt-1">
+              These are the default settings for video generation
+            </div>
+          </div>
 
           <div className="flex items-center justify-between">
             <button

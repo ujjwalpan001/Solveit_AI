@@ -18,11 +18,10 @@ const askQuestion = async (req, res) => {
 
     let conversation;
     
-    // If conversationId provided, validate it exists and belongs to user
+    // If conversationId provided, validate it exists
     if (conversationId) {
       conversation = await Conversation.findOne({
-        _id: conversationId,
-        userId: req.user._id
+        _id: conversationId
       });
       
       if (!conversation) {
@@ -34,7 +33,7 @@ const askQuestion = async (req, res) => {
     } else {
       // Create new conversation if none provided
       conversation = new Conversation({
-        userId: req.user._id,
+  userId: '000000000000000000000000', // Fallback ObjectId for anonymous
         subject,
         lastActivityAt: new Date()
       });
@@ -49,7 +48,7 @@ const askQuestion = async (req, res) => {
 
     // Create question document
     const questionDoc = new Question({
-      userId: req.user._id,
+  userId: '000000000000000000000000', // Fallback ObjectId for anonymous
       conversationId: conversation._id,
       question,
       subject,
@@ -73,8 +72,8 @@ const askQuestion = async (req, res) => {
         questionId: questionDoc._id,
         question,
         answer,
-        language: req.user.preferences.language,
-        voice: req.user.preferences.voice
+        language: 'en', // Default language
+        voice: 'female' // Default voice
       });
     }
 
@@ -100,7 +99,7 @@ const getQuestions = async (req, res) => {
   try {
     const { page = 1, limit = 10, subject, search, conversationId } = req.query;
 
-    const query = { userId: req.user._id };
+  const query = { userId: '000000000000000000000000' }; // Fallback ObjectId for anonymous
     
     if (conversationId) {
       query.conversationId = conversationId;
@@ -155,7 +154,7 @@ const getQuestion = async (req, res) => {
 
     const question = await Question.findOne({
       _id: id,
-      userId: req.user._id
+  userId: '000000000000000000000000' // Fallback ObjectId for anonymous
     }).populate('conversationId', 'title subject');
 
     console.log(`📈 Question found:`, {
@@ -196,7 +195,7 @@ const deleteQuestion = async (req, res) => {
 
     const question = await Question.findOneAndDelete({
       _id: id,
-      userId: req.user._id
+  userId: '000000000000000000000000' // Fallback ObjectId for anonymous
     });
 
     if (!question) {
@@ -226,7 +225,7 @@ const generateVideoForQuestion = async (req, res) => {
 
     const question = await Question.findOne({
       _id: id,
-      userId: req.user._id
+  userId: '000000000000000000000000' // Fallback ObjectId for anonymous
     });
 
     if (!question) {
@@ -253,8 +252,8 @@ const generateVideoForQuestion = async (req, res) => {
       questionId: question._id,
       question: question.question,
       answer: question.answer,
-      language: req.user.preferences.language,
-      voice: req.user.preferences.voice
+      language: 'en', // Default language
+      voice: 'female' // Default voice
     });
 
     res.json({

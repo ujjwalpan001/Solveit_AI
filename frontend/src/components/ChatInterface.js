@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useQuestions } from '../hooks/useQuestions';
-import { useAuth } from '../hooks/useAuth';
 import { useConversations } from '../context/ConversationContext';
 import ConversationSidebar from './ConversationSidebar';
 import { toast } from 'react-toastify';
@@ -39,7 +38,6 @@ function ChatInterface() {
   const [videoPolling, setVideoPolling] = useState(new Set());
   const [showSidebar, setShowSidebar] = useState(true);
   const { askQuestion, generateVideo: generateVideoForQuestion, loading } = useQuestions();
-  const { user } = useAuth();
   const messagesEndRef = useRef(null);
 
   // Handle conversation selection
@@ -660,13 +658,11 @@ function ChatInterface() {
             </button>
           </div>
 
-          {/* User preferences */}
-          {user?.preferences && (
-            <div className="mt-3 text-xs text-gray-500 flex items-center space-x-4">
-              <span>Language: {user.preferences.language === 'en' ? 'English' : 'Hindi'}</span>
-              <span>Voice: {user.preferences.voice === 'male' ? 'Male' : 'Female'}</span>
-            </div>
-          )}
+          {/* Default preferences */}
+          <div className="mt-3 text-xs text-gray-500 flex items-center space-x-4">
+            <span>Language: English</span>
+            <span>Voice: Female</span>
+          </div>
         </div>
       </div>
       </div>

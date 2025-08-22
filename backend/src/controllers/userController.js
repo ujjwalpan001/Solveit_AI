@@ -3,7 +3,7 @@ const Question = require('../models/Question');
 
 const getDashboardStats = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = 'anonymous'; // Use anonymous user ID
 
     // Get total questions count
     const totalQuestions = await Question.countDocuments({ userId });
@@ -68,7 +68,7 @@ const searchQuestions = async (req, res) => {
   try {
     const { query, subject, startDate, endDate, page = 1, limit = 10 } = req.query;
 
-    const searchCriteria = { userId: req.user._id };
+    const searchCriteria = { userId: 'anonymous' }; // Search anonymous user questions
 
     if (query) {
       searchCriteria.$or = [

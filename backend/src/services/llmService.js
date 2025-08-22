@@ -17,6 +17,33 @@ const generateAnswer = async (question, subject) => {
       model: model,
       temperature: 0.7,
       max_tokens: 2000,
+      top_p: 0.9,
+      response_format: {
+        "type": "json_schema",
+        "json_schema": {
+          "name": "educational_response_schema",
+          "strict": true,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "ans": {
+                "type": "string",
+                "description": "The main educational answer with LaTeX formatting"
+              },
+              "manimkatex": {
+                "type": "string",
+                "description": "Manim animation code for visual representation"
+              },
+              "tts": {
+                "type": "string",
+                "description": "Text-to-speech optimized script with pause markers"
+              }
+            },
+            "required": ["ans", "manimkatex", "tts"],
+            "additionalProperties": false
+          }
+        }
+      },
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: question }
@@ -48,8 +75,8 @@ const processResponse = (answerText, subject) => {
   // Extract JSON from the response if it's wrapped in explanatory text
   let jsonText = answerText;
   
-  // Look for JSON block between ```json and ``` or just { and }
-  const jsonMatch = answerText.match(/```json\s*([\s\S]*?)\s*```/) || 
+  // Look for JSON block between `````` or just { and }
+  const jsonMatch = answerText.match(/``````/) || 
                    answerText.match(/(\{[\s\S]*\})/);
   
   if (jsonMatch) {
@@ -100,7 +127,12 @@ CRITICAL: Your response must be ONLY a valid JSON object with no additional text
   "tts": "Script for text-to-speech that matches the video content with timing markers like [PAUSE 1] where the number indicates seconds to pause for sync with animations"
 }
 
-IMPORTANT: Do not include any text before or after the JSON. Do not wrap it in markdown code blocks. Return only the raw JSON object.
+IMPORTANT: 
+- Do not include any text before or after the JSON
+- Do not wrap it in markdown code blocks
+- Return only the raw JSON object
+- Use double backslashes in LaTeX: \\\\frac{1}{2} not \\frac{1}{2}
+- Properly escape all strings for JSON format
 
 CRITICAL: Video and audio must be perfectly synchronized! Use self.wait(duration) in Manim code to match the total timing of [PAUSE duration] markers in TTS.
 

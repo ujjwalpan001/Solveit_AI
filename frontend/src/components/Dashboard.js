@@ -2,7 +2,6 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { toast } from 'react-toastify';
 import { Link } from 'react-router-dom';
 import { useQuestions } from '../hooks/useQuestions';
-import { useAuth } from '../hooks/useAuth';
 import SearchBar from './SearchBar';
 import HistoryList from './HistoryList';
 import VideoPlayer from './VideoPlayer';
@@ -12,8 +11,7 @@ import {
   Video, 
   Clock, 
   TrendingUp,
-  BarChart3,
-  Settings
+  BarChart3
 } from 'lucide-react';
 
 function Dashboard() {
@@ -24,14 +22,8 @@ function Dashboard() {
     getQuestions, 
     getDashboardStats 
   } = useQuestions();
-  const { user, updateProfile } = useAuth();
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const [showVideoPlayer, setShowVideoPlayer] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [preferences, setPreferences] = useState({
-    language: user?.preferences?.language || 'en',
-    voice: user?.preferences?.voice || 'female'
-  });
 
   useEffect(() => {
     getQuestions({ limit: 10 });
@@ -43,15 +35,7 @@ function Dashboard() {
     setShowVideoPlayer(true);
   };
 
-  const handlePreferencesUpdate = async () => {
-    const result = await updateProfile({ preferences });
-    if (result.success) {
-      setShowSettings(false);
-      toast.success('Preferences updated successfully!');
-    } else {
-      toast.error(result.error);
-    }
-  };
+
 
   const StatCard = ({ icon: Icon, title, value, subtitle, color }) => (
     <div className="bg-white rounded-lg shadow p-6">
@@ -76,19 +60,13 @@ function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">
-            Welcome back, {user?.firstName}! 👋
+            Welcome to AI Tutor! 👋
           </h1>
           <p className="text-gray-600 mt-1">
             Ready to learn something new today?
           </p>
         </div>
         <div className="flex items-center space-x-3">
-          <button
-            onClick={() => setShowSettings(true)}
-            className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
-          >
-            <Settings className="h-5 w-5" />
-          </button>
           <Link
             to="/ask"
             className="bg-primary-600 text-white px-4 py-2 rounded-md hover:bg-primary-700 transition-colors flex items-center space-x-2"
@@ -192,59 +170,7 @@ function Dashboard() {
         />
       )}
 
-      {/* Settings Modal */}
-      {showSettings && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Preferences</h3>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Language
-                </label>
-                <select
-                  value={preferences.language}
-                  onChange={(e) => setPreferences(prev => ({ ...prev, language: e.target.value }))}
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                >
-                  <option value="en">English</option>
-                  <option value="hi">Hindi</option>
-                </select>
-              </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Voice
-                </label>
-                <select
-                  value={preferences.voice}
-                  onChange={(e) => setPreferences(prev => ({ ...prev, voice: e.target.value }))}
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-primary-500 focus:border-primary-500"
-                >
-                  <option value="female">Female</option>
-                  <option value="male">Male</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end space-x-3 mt-6">
-              <button
-                onClick={() => setShowSettings(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handlePreferencesUpdate}
-                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

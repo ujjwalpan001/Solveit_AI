@@ -6,13 +6,10 @@ const {
   deleteQuestion,
   generateVideoForQuestion
 } = require('../controllers/questionController');
-const authMiddleware = require('../middlewares/authMiddleware');
 
 const router = express.Router();
 
-// All question routes require authentication
-router.use(authMiddleware);
-
+// Question routes - no authentication required
 router.post('/', askQuestion);
 router.get('/', getQuestions);
 router.get('/:id', getQuestion);

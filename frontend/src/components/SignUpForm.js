@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { toast } from 'react-toastify';
 import { Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 
 function SignUpForm() {
+  console.log('SignUpForm component rendered');
+  
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -15,8 +17,16 @@ function SignUpForm() {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const { register, loading } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    console.log('SignUpForm component mounted');
+    return () => {
+      console.log('SignUpForm component unmounted');
+    };
+  }, []);
 
   const handleChange = (e) => {
     setFormData(prev => ({
@@ -26,43 +36,74 @@ function SignUpForm() {
   };
 
   const validateForm = () => {
+    console.log('Validating form data:', formData);
+    
     if (!formData.firstName || !formData.lastName || !formData.username || !formData.email || !formData.password) {
+      console.log('Validation failed: Missing required fields');
       toast.error('Please fill in all fields');
       return false;
     }
 
     if (formData.password !== formData.confirmPassword) {
+      console.log('Validation failed: Passwords do not match');
       toast.error('Passwords do not match');
       return false;
     }
 
     if (formData.password.length < 6) {
+      console.log('Validation failed: Password too short');
       toast.error('Password must be at least 6 characters long');
       return false;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(formData.email)) {
+      console.log('Validation failed: Invalid email format');
       toast.error('Please enter a valid email address');
       return false;
     }
 
+    console.log('Form validation passed');
     return true;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    e.stopPropagation();
+    
+    if (isSubmitting || loading) {
+      console.log('Form submission blocked - already submitting or loading');
+      return;
+    }
     
     if (!validateForm()) return;
 
-    const { confirmPassword, ...userData } = formData;
-    const result = await register(userData);
+    setIsSubmitting(true);
+    console.log('Starting registration process...');
     
-    if (result.success) {
-      toast.success('Registration successful! Welcome to AI Tutor!');
-      navigate('/dashboard');
-    } else {
-      toast.error(result.error);
+    try {
+      const { confirmPassword, ...userData } = formData;
+      console.log('Registration data:', userData);
+      
+      const result = await register(userData);
+      
+      console.log('Registration result:', result);
+      
+      if (result.success) {
+        toast.success('Registration successful! Welcome to AI Tutor!');
+        // Add a small delay to ensure state is updated before navigation
+        setTimeout(() => {
+          console.log('Navigating to dashboard after successful registration');
+          navigate('/dashboard', { replace: true });
+        }, 100);
+      } else {
+        toast.error(result.error);
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
+      toast.error('Registration failed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -74,7 +115,7 @@ function SignUpForm() {
           <p className="text-gray-600 mt-2">Join AI Tutor and start learning</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label htmlFor="firstName" className="block text-sm font-medium text-gray-700 mb-1">
@@ -214,10 +255,10 @@ function SignUpForm() {
           <div>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || isSubmitting}
               className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {loading ? (
+              {loading || isSubmitting ? (
                 <div className="loading-spinner w-5 h-5"></div>
               ) : (
                 'Create Account'

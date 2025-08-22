@@ -13,7 +13,7 @@ const createConversation = async (req, res) => {
     }
 
     const conversation = new Conversation({
-      userId: req.user._id,
+  userId: '000000000000000000000000', // Fallback ObjectId for anonymous
       subject,
       title,
       lastActivityAt: new Date()
@@ -43,7 +43,7 @@ const getConversations = async (req, res) => {
   try {
     const { page = 1, limit = 10, subject, active = true } = req.query;
 
-    const query = { userId: req.user._id };
+  const query = { userId: '000000000000000000000000' }; // Fallback ObjectId for anonymous
     
     if (subject && subject !== 'all') {
       query.subject = subject;
@@ -90,7 +90,7 @@ const getConversation = async (req, res) => {
 
     const conversation = await Conversation.findOne({
       _id: id,
-      userId: req.user._id
+  userId: '000000000000000000000000' // Fallback ObjectId for anonymous
     });
 
     if (!conversation) {
@@ -105,7 +105,7 @@ const getConversation = async (req, res) => {
     if (includeQuestions === 'true') {
       const questions = await Question.find({ 
         conversationId: id,
-        userId: req.user._id 
+  userId: '000000000000000000000000' // Fallback ObjectId for anonymous
       })
         .sort({ createdAt: 1 })
         .limit(questionsLimit * 1)
@@ -114,7 +114,7 @@ const getConversation = async (req, res) => {
 
       const totalQuestions = await Question.countDocuments({ 
         conversationId: id,
-        userId: req.user._id 
+  userId: '000000000000000000000000' // Fallback ObjectId for anonymous
       });
 
       responseData.questions = questions;
@@ -151,7 +151,7 @@ const updateConversation = async (req, res) => {
     updateData.lastActivityAt = new Date();
 
     const conversation = await Conversation.findOneAndUpdate(
-      { _id: id, userId: req.user._id },
+  { _id: id, userId: '000000000000000000000000' }, // Update anonymous user conversation
       updateData,
       { new: true }
     );
@@ -187,13 +187,13 @@ const deleteConversation = async (req, res) => {
     // Delete all questions in the conversation
     await Question.deleteMany({ 
       conversationId: id,
-      userId: req.user._id 
+  userId: '000000000000000000000000' // Delete anonymous user questions
     });
 
     // Delete the conversation
     const conversation = await Conversation.findOneAndDelete({
       _id: id,
-      userId: req.user._id
+  userId: '000000000000000000000000' // Delete anonymous user conversation
     });
 
     if (!conversation) {

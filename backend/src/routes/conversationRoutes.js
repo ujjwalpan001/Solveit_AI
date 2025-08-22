@@ -1,12 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const authMiddleware = require('../middlewares/authMiddleware');
 const conversationController = require('../controllers/conversationController');
 
-// Apply auth middleware to all routes
-router.use(authMiddleware);
-
-// Conversation routes
+// Conversation routes - no authentication required
 router.post('/', conversationController.createConversation);
 router.get('/', conversationController.getConversations);
 router.get('/:id', conversationController.getConversation);

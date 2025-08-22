@@ -2,7 +2,6 @@ import os
 import sys
 import json
 import uuid
-import time
 import asyncio
 import shutil
 import subprocess
@@ -402,6 +401,8 @@ def execute_manim_python_code(manim_code: str, output_path: str, tts_script: str
         print(f"   {cleaned_code[:200]}...")
         
         # Create a temporary module to execute the code
+        import time
+        import uuid
         temp_module_name = f"temp_manim_scene_{uuid.uuid4().hex[:8]}"
         
         # Create globals for the code execution
@@ -468,7 +469,7 @@ def generate_math_video(answer_data: Dict, output_path: str) -> bool:
     try:
         print("   🎬 Starting synchronized Manim math video generation...")
         
-        # Extract Manim code and TTS script from structured data
+        # Extract Manim KaTeX and TTS script from structured data
         manim_code = answer_data.get('manimkatex', answer_data.get('manimlatex', ''))
         tts_script = answer_data.get('tts', '')
         
@@ -490,7 +491,7 @@ def generate_math_video(answer_data: Dict, output_path: str) -> bool:
         print("   🎥 Processing Manim code...")
         
         # Check if it's Python code or LaTeX content
-        if manim_code.strip().startswith('from manim import'):
+        if manim_code.strip().startswith('from manim import') or manim_code.strip().startswith('class '):
             # It's Python code - execute it directly
             print("   🐍 Detected Python Manim code, executing directly...")
             return execute_manim_python_code(manim_code, output_path, tts_script)
@@ -498,21 +499,21 @@ def generate_math_video(answer_data: Dict, output_path: str) -> bool:
             # It's LaTeX/KaTeX content - use the old method
             print("   📐 Detected LaTeX content, using MathAnimationScene...")
             scene = MathAnimationScene(manim_code, tts_script)
-            
-            print("   🎬 Rendering synchronized Manim scene...")
-            scene.render()
-            
-            # Find the rendered video file
-            rendered_files = list(UPLOAD_DIR.glob("MathAnimationScene*.mp4"))
-            if rendered_files:
-                # Move the most recent file to the target path
-                latest_file = max(rendered_files, key=lambda x: x.stat().st_mtime)
-                latest_file.rename(output_path)
-                print(f"   ✅ Synchronized math video rendered successfully: {Path(output_path).stat().st_size} bytes")
-                return True
-            else:
-                print("   ❌ No rendered video file found")
-                return False
+        
+        print("   🎬 Rendering synchronized Manim scene...")
+        scene.render()
+        
+        # Find the rendered video file
+        rendered_files = list(UPLOAD_DIR.glob("MathAnimationScene*.mp4"))
+        if rendered_files:
+            # Move the most recent file to the target path
+            latest_file = max(rendered_files, key=lambda x: x.stat().st_mtime)
+            latest_file.rename(output_path)
+            print(f"   ✅ Synchronized math video rendered successfully: {Path(output_path).stat().st_size} bytes")
+            return True
+        else:
+            print("   ❌ No rendered video file found")
+            return False
                 
     except Exception as e:
         print(f"   💥 Error in math video generation: {e}")
