@@ -79,6 +79,13 @@ class JobQueue {
     console.log(`   Answer keys: ${answer ? Object.keys(answer) : 'None'}`);
     
     try {
+      // Check if question already has a video to avoid regenerating
+      const existingQuestion = await Question.findById(questionId);
+      if (existingQuestion && existingQuestion.videoPath && existingQuestion.status === 'completed') {
+        console.log('✅ JOB QUEUE: Question already has completed video, skipping...');
+        return;
+      }
+      
       // Update question status
       console.log('📝 JOB QUEUE: Updating question status to processing...');
       await Question.findByIdAndUpdate(questionId, {
@@ -95,24 +102,52 @@ class JobQueue {
       
       console.log('✅ JOB QUEUE: Video generation result:', videoResult);
 
-      // Generate audio
-      console.log('🔊 JOB QUEUE: Calling TTS service...');
-      const audioResult = await ttsService.generateAudio(answer.text, language, voice);
-      console.log('✅ JOB QUEUE: Audio generation result:', audioResult);
+      if (!videoResult.success) {
+        throw new Error(`Video generation failed: ${videoResult.error}`);
+      }
+
+      // Try to generate audio, but don't fail the entire job if this fails
+      let audioPath = null;
+      try {
+        console.log('🔊 JOB QUEUE: Calling TTS service...');
+        // Add a shorter timeout for TTS to avoid hanging
+        const audioResult = await Promise.race([
+          ttsService.generateAudio(answer, language, voice),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('TTS timeout')), 30000)
+          )
+        ]);
+        console.log('✅ JOB QUEUE: Audio generation result:', audioResult);
+        audioPath = audioResult.audioPath;
+      } catch (audioError) {
+        console.error('⚠️ JOB QUEUE: Audio generation failed, but continuing with video:', audioError.message);
+        // Don't throw error - video generation succeeded, that's the main goal
+      }
 
       // Update question with results
       console.log('📝 JOB QUEUE: Updating question with results...');
-      await Question.findByIdAndUpdate(questionId, {
+      const updateData = {
         status: 'completed',
         videoPath: videoResult.videoPath,
-        audioPath: audioResult.audioPath,
         completedAt: new Date(),
         'metadata.videoGenerated': true,
-        'metadata.audioGenerated': true,
         'metadata.processingTime': Date.now() - new Date(job.createdAt).getTime()
-      });
+      };
+
+      if (audioPath) {
+        updateData.audioPath = audioPath;
+        updateData['metadata.audioGenerated'] = true;
+      } else {
+        updateData['metadata.audioGenerated'] = false;
+        updateData['metadata.audioError'] = 'TTS generation failed';
+      }
+
+      await Question.findByIdAndUpdate(questionId, updateData);
 
       console.log(`🎉 JOB QUEUE: Video generation completed for question ${questionId}`);
+      if (!audioPath) {
+        console.log(`⚠️ JOB QUEUE: Audio generation failed, but video is available`);
+      }
     } catch (error) {
       console.error(`💥 JOB QUEUE: Video generation failed for question ${questionId}:`, error);
       throw error;

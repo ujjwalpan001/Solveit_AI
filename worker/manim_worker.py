@@ -11,12 +11,10 @@ import uvicorn
 
 # Manim imports
 from manim import *
+print("✅ Manim imported successfully")
 
 # TTS imports
 from gtts import gTTS
-import cv2
-import numpy as np
-from PIL import Image, ImageDraw, ImageFont
 
 app = FastAPI(title="AI Tutor Video Worker", version="1.0.0")
 
@@ -36,40 +34,86 @@ class VideoResponse(BaseModel):
     error: str = None
 
 class MathAnimationScene(Scene):
-    def __init__(self, steps: List[Dict], **kwargs):
+    def __init__(self, katex_content: str, tts_script: str = "", **kwargs):
         super().__init__(**kwargs)
-        self.steps = steps
+        self.katex_content = katex_content
+        self.tts_script = tts_script
         
     def construct(self):
-        title = Text("Solution", font_size=48, color=BLUE).to_edge(UP)
+        # Title
+        title = Text("Mathematical Solution", font_size=40, color=BLUE).to_edge(UP)
         self.play(Write(title))
         self.wait(1)
         
-        current_y = 2
+        if not self.katex_content:
+            # Fallback for no KaTeX content
+            no_content = Text("No mathematical content available", font_size=24, color=WHITE)
+            no_content.move_to(ORIGIN)
+            self.play(Write(no_content))
+            self.wait(2)
+            return
         
-        for i, step in enumerate(self.steps):
-            if step['type'] == 'equation':
-                equation = MathTex(step['content'], font_size=36)
-                equation.move_to([0, current_y, 0])
-                self.play(Write(equation))
-                self.wait(2)
-                current_y -= 0.8
+        try:
+            # Split KaTeX content by double backslashes for step-by-step animation
+            katex_steps = self.katex_content.split('\\\\')
+            
+            # Clean and prepare each step
+            cleaned_steps = []
+            for step in katex_steps:
+                cleaned_step = step.strip()
+                if cleaned_step:
+                    cleaned_steps.append(cleaned_step)
+            
+            print(f"   📊 Processing {len(cleaned_steps)} KaTeX steps")
+            
+            current_y = 2
+            previous_equations = []
+            
+            for i, katex_step in enumerate(cleaned_steps):
+                print(f"   📐 Step {i+1}: {katex_step[:50]}...")
                 
-            elif step['type'] == 'text' or step['type'] == 'explanation':
-                # Split long text into multiple lines
-                lines = self.split_text(step['content'], 50)
-                for line in lines:
-                    text = Text(line, font_size=24, color=WHITE)
-                    text.move_to([0, current_y, 0])
-                    self.play(Write(text))
-                    self.wait(1.5)
-                    current_y -= 0.5
+                try:
+                    # Create MathTex object for this step
+                    if katex_step.startswith('\\text{'):
+                        # Handle text annotations
+                        math_obj = MathTex(katex_step, font_size=32, color=YELLOW)
+                    else:
+                        # Handle mathematical equations
+                        math_obj = MathTex(katex_step, font_size=36, color=WHITE)
                     
-            if current_y < -3:
-                self.play(FadeOut(*self.mobjects))
-                current_y = 2
-        
-        self.wait(2)
+                    math_obj.move_to([0, current_y, 0])
+                    
+                    # Animate the appearance of this step
+                    self.play(Write(math_obj), run_time=1.5)
+                    self.wait(1)
+                    
+                    previous_equations.append(math_obj)
+                    current_y -= 0.8
+                    
+                    # If we're running out of space, clear previous equations
+                    if current_y < -2.5 and i < len(cleaned_steps) - 3:
+                        self.play(*[FadeOut(eq) for eq in previous_equations[:-1]])
+                        previous_equations = [previous_equations[-1]]  # Keep the last one
+                        current_y = 1
+                        
+                except Exception as step_error:
+                    print(f"   ❌ Error rendering step {i+1}: {step_error}")
+                    # Fallback to text for problematic KaTeX
+                    fallback_text = Text(f"Step {i+1}: {katex_step}", font_size=24, color=RED)
+                    fallback_text.move_to([0, current_y, 0])
+                    self.play(Write(fallback_text))
+                    self.wait(1)
+                    current_y -= 0.6
+            
+            self.wait(3)
+            
+        except Exception as e:
+            print(f"   ❌ Error in MathAnimationScene construction: {e}")
+            # Complete fallback
+            error_text = Text("Error rendering mathematical content", font_size=24, color=RED)
+            error_text.move_to(ORIGIN)
+            self.play(Write(error_text))
+            self.wait(2)
     
     def split_text(self, text: str, max_length: int) -> List[str]:
         words = text.split()
@@ -152,282 +196,97 @@ class SlideAnimationScene(Scene):
             
         return lines
 
-def generate_math_video(steps: List[Dict], output_path: str) -> bool:
-    """Generate video for math problems using Manim"""
+def generate_math_video(answer_data: Dict, output_path: str) -> bool:
+    """Generate video for math problems using Manim with proper LaTeX"""
     try:
-        # Configure Manim
-        config.media_dir = str(UPLOAD_DIR)
-        config.video_dir = str(UPLOAD_DIR)
-        config.quality = "medium_quality"
-        config.fps = 30
+        print("   🎬 Starting Manim math video generation...")
         
-        # Create scene
-        scene = MathAnimationScene(steps)
+        # Extract Manim KaTeX and TTS script from structured data
+        katex_content = answer_data.get('manimkatex', answer_data.get('manimlatex', ''))
+        tts_script = answer_data.get('tts', '')
+        
+        print(f"   📐 KaTeX content length: {len(katex_content)} characters")
+        print(f"   🎤 TTS script length: {len(tts_script)} characters")
+        
+        if not katex_content:
+            print("   ❌ No KaTeX content provided")
+            return False
+        
+        # Configure Manim
+        from manim import config as manim_config
+        manim_config.media_dir = str(UPLOAD_DIR)
+        manim_config.video_dir = str(UPLOAD_DIR)
+        manim_config.quality = "medium_quality"
+        manim_config.fps = 30
+        
+        print("   🎥 Creating Manim scene...")
+        
+        # Create scene with KaTeX content
+        scene = MathAnimationScene(katex_content, tts_script)
+        
+        print("   🎬 Rendering Manim scene...")
         scene.render()
         
-        # Move the rendered video to the specified path
+        # Find the rendered video file
         rendered_files = list(UPLOAD_DIR.glob("MathAnimationScene*.mp4"))
         if rendered_files:
-            rendered_files.rename(output_path)
-            return True
-        
-        return False
-    except Exception as e:
-        print(f"Error generating math video: {e}")
-        return False
-
-def generate_slide_video(steps: List[Dict], output_path: str) -> bool:
-    """Generate slide-style video for non-math content"""
-    try:
-        # Configure Manim
-        config.media_dir = str(UPLOAD_DIR)
-        config.video_dir = str(UPLOAD_DIR)
-        config.quality = "medium_quality"
-        config.fps = 30
-        
-        # Create scene
-        scene = SlideAnimationScene(steps)
-        scene.render()
-        
-        # Move the rendered video to the specified path
-        rendered_files = list(UPLOAD_DIR.glob("SlideAnimationScene*.mp4"))
-        if rendered_files:
-            rendered_files.rename(output_path)
-            return True
-        
-        return False
-    except Exception as e:
-        print(f"Error generating slide video: {e}")
-        return False
-
-def generate_simple_video(steps: List[Dict], output_path: str) -> bool:
-    """Generate simple video using OpenCV as fallback"""
-    try:
-        print("   🎬 Starting simple video generation...")
-        
-        # Video settings
-        width, height = 1280, 720
-        fps = 30
-        duration_per_step = 4  # seconds
-        
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
-        
-        if not out.isOpened():
-            print("   ❌ Failed to open video writer")
-            return False
-        
-        # Background color (dark blue)
-        bg_color = (40, 40, 80)
-        
-        print(f"   📝 Processing {len(steps)} steps...")
-        
-        for step_idx, step in enumerate(steps):
-            content = step.get('content', 'No content')
-            step_type = step.get('type', 'text')
-            
-            print(f"   📄 Step {step_idx + 1}/{len(steps)}: {step_type}")
-            
-            # Create frames for this step
-            frames_per_step = fps * duration_per_step
-            
-            for frame_num in range(frames_per_step):
-                # Create background
-                frame = np.full((height, width, 3), bg_color, dtype=np.uint8)
-                
-                # Convert to PIL for text rendering
-                pil_img = Image.fromarray(frame)
-                draw = ImageDraw.Draw(pil_img)
-                
-                # Try to load a font
-                try:
-                    # Try different font sizes based on content length
-                    font_size = 32 if len(content) < 100 else 28 if len(content) < 200 else 24
-                    font = ImageFont.truetype("arial.ttf", font_size)
-                except:
-                    try:
-                        font = ImageFont.load_default()
-                    except:
-                        print("   ⚠️ Using basic font rendering")
-                        font = None
-                
-                # Add title
-                title = f"Step {step_idx + 1}: {step_type.title()}"
-                if font:
-                    draw.text((50, 50), title, fill=(255, 255, 100), font=font)
-                
-                # Process content based on type
-                if step_type == 'equation' or 'equation' in content.lower():
-                    # Handle math equations
-                    lines = [content]  # Keep equations on single line if possible
-                    text_color = (100, 255, 100)  # Green for math
-                else:
-                    # Split text into manageable lines
-                    lines = split_text_smart(content, 60)
-                    text_color = (255, 255, 255)  # White for regular text
-                
-                y_offset = 120
-                line_height = 40
-                
-                for line_idx, line in enumerate(lines[:15]):  # Limit to 15 lines
-                    if not line.strip():
-                        continue
-                        
-                    # Clean line of special characters that might cause issues
-                    clean_line = clean_text_for_display(line)
-                    
-                    if font:
-                        draw.text((50, y_offset), clean_line, fill=text_color, font=font)
-                    y_offset += line_height
-                    
-                    if y_offset > height - 100:  # Leave space at bottom
-                        break
-                
-                # Add progress indicator
-                progress = (step_idx + 1) / len(steps)
-                progress_width = int((width - 100) * progress)
-                draw.rectangle([50, height - 50, 50 + progress_width, height - 40], 
-                             fill=(100, 200, 255))
-                
-                # Convert back to numpy array
-                frame = np.array(pil_img)
-                
-                # Write frame
-                out.write(frame)
-        
-        out.release()
-        
-        # Verify file was created and has content
-        if Path(output_path).exists() and Path(output_path).stat().st_size > 1000:
-            print(f"   ✅ Simple video generated: {Path(output_path).stat().st_size} bytes")
+            # Move the most recent file to the target path
+            latest_file = max(rendered_files, key=lambda x: x.stat().st_mtime)
+            latest_file.rename(output_path)
+            print(f"   ✅ Manim video rendered successfully: {Path(output_path).stat().st_size} bytes")
             return True
         else:
-            print(f"   ❌ Video file not created or too small")
+            print("   ❌ No rendered video file found")
             return False
-        
+                
     except Exception as e:
-        print(f"   💥 Error generating simple video: {e}")
+        print(f"   💥 Error in math video generation: {e}")
         import traceback
         traceback.print_exc()
         return False
 
-    def split_text_smart(self, text: str, max_length: int) -> List[str]:
-        """Smart text splitting that preserves words and handles special characters"""
-        if not text:
-            return [""]
-            
-        # Remove or replace problematic characters
-        text = text.replace('\u2014', '-').replace('\u2013', '-')  # Em dash, en dash
-        text = text.replace('\u201c', '"').replace('\u201d', '"')  # Smart quotes
-        text = text.replace('\u2018', "'").replace('\u2019', "'")  # Smart apostrophes
+def generate_slide_video(answer_data: Dict, output_path: str) -> bool:
+    """Generate slide-style video using Manim SlideAnimationScene"""
+    try:
+        print("   🎬 Starting Manim slide video generation...")
         
-        paragraphs = text.split('\n')
-        lines = []
+        # Convert structured answer to steps format
+        steps = answer_data.get('steps', [])
+        if not steps:
+            steps = [{'type': 'text', 'content': answer_data.get('text', 'No content available')}]
         
-        for paragraph in paragraphs:
-            if not paragraph.strip():
-                lines.append("")
-                continue
-                
-            words = paragraph.split()
-            current_line = ""
-            
-            for word in words:
-                if len(current_line + " " + word) <= max_length:
-                    current_line += (" " + word) if current_line else word
-                else:
-                    if current_line:
-                        lines.append(current_line)
-                    current_line = word
-            
-            if current_line:
-                lines.append(current_line)
+        # Configure Manim
+        from manim import config as manim_config
+        manim_config.media_dir = str(UPLOAD_DIR)
+        manim_config.video_dir = str(UPLOAD_DIR)
+        manim_config.quality = "medium_quality"
+        manim_config.fps = 30
         
-        return lines if lines else [""]
-
-    def clean_text_for_display(self, text: str) -> str:
-        """Clean text for display, removing problematic characters"""
-        if not text:
-            return ""
-            
-        # Replace common problematic Unicode characters
-        replacements = {
-            '\u2014': '--',  # Em dash
-            '\u2013': '-',   # En dash
-            '\u201c': '"',   # Left double quote
-            '\u201d': '"',   # Right double quote
-            '\u2018': "'",   # Left single quote
-            '\u2019': "'",   # Right single quote
-            '\u2026': '...',  # Ellipsis
-            '\u00a0': ' ',   # Non-breaking space
-        }
+        print("   🎥 Creating Manim slide scene...")
         
-        for unicode_char, replacement in replacements.items():
-            text = text.replace(unicode_char, replacement)
+        # Create scene with steps
+        scene = SlideAnimationScene(steps)
         
-        # Remove any remaining non-ASCII characters that might cause issues
-        text = ''.join(char if ord(char) < 128 else '?' for char in text)
+        print("   🎬 Rendering Manim slide scene...")
+        scene.render()
         
-        return text
-
-def split_text_smart(text: str, max_length: int) -> List[str]:
-    """Smart text splitting that preserves words and handles special characters"""
-    if not text:
-        return [""]
+        # Find the rendered video file
+        rendered_files = list(UPLOAD_DIR.glob("SlideAnimationScene*.mp4"))
+        if rendered_files:
+            # Move the most recent file to the target path
+            latest_file = max(rendered_files, key=lambda x: x.stat().st_mtime)
+            latest_file.rename(output_path)
+            print(f"   ✅ Manim slide video rendered successfully: {Path(output_path).stat().st_size} bytes")
+            return True
+        else:
+            print("   ❌ No rendered video file found")
+            return False
         
-    # Remove or replace problematic characters
-    text = text.replace('\u2014', '-').replace('\u2013', '-')  # Em dash, en dash
-    text = text.replace('\u201c', '"').replace('\u201d', '"')  # Smart quotes
-    text = text.replace('\u2018', "'").replace('\u2019', "'")  # Smart apostrophes
-    
-    paragraphs = text.split('\n')
-    lines = []
-    
-    for paragraph in paragraphs:
-        if not paragraph.strip():
-            lines.append("")
-            continue
-            
-        words = paragraph.split()
-        current_line = ""
-        
-        for word in words:
-            if len(current_line + " " + word) <= max_length:
-                current_line += (" " + word) if current_line else word
-            else:
-                if current_line:
-                    lines.append(current_line)
-                current_line = word
-        
-        if current_line:
-            lines.append(current_line)
-    
-    return lines if lines else [""]
-
-def clean_text_for_display(text: str) -> str:
-    """Clean text for display, removing problematic characters"""
-    if not text:
-        return ""
-        
-    # Replace common problematic Unicode characters
-    replacements = {
-        '\u2014': '--',  # Em dash
-        '\u2013': '-',   # En dash
-        '\u201c': '"',   # Left double quote
-        '\u201d': '"',   # Right double quote
-        '\u2018': "'",   # Left single quote
-        '\u2019': "'",   # Right single quote
-        '\u2026': '...',  # Ellipsis
-        '\u00a0': ' ',   # Non-breaking space
-    }
-    
-    for unicode_char, replacement in replacements.items():
-        text = text.replace(unicode_char, replacement)
-    
-    # Remove any remaining non-ASCII characters that might cause issues
-    text = ''.join(char if ord(char) < 128 else '?' for char in text)
-    
-    return text
+    except Exception as e:
+        print(f"   ❌ Error in slide video generation: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 @app.post("/generate-video", response_model=VideoResponse)
 async def generate_video(request: VideoRequest):
@@ -446,55 +305,27 @@ async def generate_video(request: VideoRequest):
         print(f"   Video ID: {video_id}")
         print(f"   Output path: {video_path}")
         
-        steps = request.answer.get('steps', [])
-        if not steps:
-            # Create a single step from the text
-            steps = [{'type': 'text', 'content': request.answer.get('text', 'No content available')}]
+        # Check if we have structured Manim data
+        has_manim_katex = bool(request.answer.get('manimkatex', request.answer.get('manimlatex')))
+        has_tts_script = bool(request.answer.get('tts'))
         
-        print(f"   Steps count: {len(steps)}")
-        print(f"   Steps types: {[step.get('type', 'unknown') for step in steps]}")
+        print(f"   Has Manim KaTeX: {has_manim_katex}")
+        print(f"   Has TTS script: {has_tts_script}")
         
-        # Determine video type based on content
-        has_math = any(step.get('type') == 'equation' for step in steps)
-        has_code = any(step.get('type') == 'code' for step in steps)
-        
-        print(f"   Has math: {has_math}")
-        print(f"   Has code: {has_code}")
-        
+        # Try Manim generation based on content type
         success = False
         
-        if has_math:
-            # Try Manim for math content
+        if has_manim_katex:
+            # Use math video generation for KaTeX content
             print("   🎯 Attempting Manim math video generation...")
-            try:
-                success = generate_math_video(steps, str(video_path))
-                print(f"   ✅ Manim math video: {success}")
-            except Exception as e:
-                print(f"   ❌ Manim failed: {e}")
-                print("   🔄 Falling back to simple video")
-                try:
-                    success = generate_simple_video(steps, str(video_path))
-                    print(f"   ✅ Simple video fallback: {success}")
-                except Exception as fallback_error:
-                    print(f"   ❌ Simple video fallback also failed: {fallback_error}")
-                    success = False
+            success = generate_math_video(request.answer, str(video_path))
         else:
-            # Try slide animation for non-math content
-            print("   🎯 Attempting slide animation generation...")
-            try:
-                success = generate_slide_video(steps, str(video_path))
-                print(f"   ✅ Slide animation: {success}")
-            except Exception as e:
-                print(f"   ❌ Slide animation failed: {e}")
-                print("   🔄 Falling back to simple video")
-                try:
-                    success = generate_simple_video(steps, str(video_path))
-                    print(f"   ✅ Simple video fallback: {success}")
-                except Exception as fallback_error:
-                    print(f"   ❌ Simple video fallback also failed: {fallback_error}")
-                    success = False
+            # Use slide animation for other content
+            print("   🎯 Attempting Manim slide video generation...")  
+            success = generate_slide_video(request.answer, str(video_path))
         
         print(f"   📁 Video file exists: {video_path.exists()}")
+        print(f"   ✅ Manim generation success: {success}")
         
         if success and video_path.exists():
             result_path = f"/uploads/videos/{video_filename}"
@@ -504,8 +335,11 @@ async def generate_video(request: VideoRequest):
                 videoPath=result_path
             )
         else:
-            print("   💥 FAILURE: Video generation failed")
-            raise HTTPException(status_code=500, detail="Video generation failed")
+            print("   💥 FAILURE: Manim video generation failed")
+            return VideoResponse(
+                success=False,
+                error="Manim video generation failed"
+            )
             
     except Exception as e:
         print(f"💥 PYTHON SERVER ERROR: {e}")

@@ -36,14 +36,34 @@ const generateAnswer = async (question, subject) => {
     
     console.log('LLM Service: Cleaned answer text:', answerText);
     
-    // Parse the answer into structured steps
-    const steps = parseAnswerIntoSteps(answerText, subject);
-    console.log('LLM Service: Parsed steps:', steps);
-
-    return {
-      text: answerText,
-      steps
+    // Try to parse JSON response, fallback to old format if not JSON
+    let structuredAnswer;
+    try {
+      structuredAnswer = JSON.parse(answerText);
+      console.log('LLM Service: Successfully parsed structured JSON response');
+    } catch (e) {
+      console.log('LLM Service: Response not in JSON format, using fallback parsing');
+      // Fallback to old parsing method
+      const steps = parseAnswerIntoSteps(answerText, subject);
+      structuredAnswer = {
+        ans: answerText,
+        manimkatex: null,
+        tts: answerText,
+        steps
+      };
+    }
+    
+    // Ensure all required fields exist
+    const answer = {
+      text: structuredAnswer.ans || answerText,
+      manimkatex: structuredAnswer.manimkatex || structuredAnswer.manimlatex || null,
+      tts: structuredAnswer.tts || structuredAnswer.ans || answerText,
+      steps: structuredAnswer.steps || parseAnswerIntoSteps(structuredAnswer.ans || answerText, subject)
     };
+    
+    console.log('LLM Service: Final structured answer:', answer);
+
+    return answer;
   } catch (error) {
     console.error('LLM Service Error:', error);
     console.error('Error details:', error.response?.data || error.message);
@@ -52,43 +72,85 @@ const generateAnswer = async (question, subject) => {
 };
 
 const getSystemPrompt = (subject) => {
-  const basePrompt = `You are an expert AI tutor. Provide clear, step-by-step explanations that are educational and easy to understand. Do not use <think> tags or show your internal reasoning - just provide the direct, helpful response.`;
+  const basePrompt = `You are an expert AI tutor. Your response must be a valid JSON object with exactly these fields:
+
+{
+  "ans": "Clear, step-by-step explanation for the user (use inline KaTeX for math: $x^2 + 1$, $$x = \\frac{-b}{2a}$$)",
+  "manimkatex": "KaTeX code specifically formatted for Manim animations (use proper MathTex syntax)",
+  "tts": "Script for text-to-speech that matches the video content"
+}
+
+IMPORTANT: 
+- For ans: Use KaTeX syntax for inline math $...$ and display math $$...$$ 
+- For manimkatex: Use clean KaTeX without delimiters like $ or $$. Use proper MathTex format for Manim.
+- For math: Include step-by-step equation transformations
+- For tts: Create a natural script that narrates the visual content
+- Always return valid JSON`;
   
   const subjectSpecificPrompts = {
-    math: `${basePrompt} For mathematical problems:
-- Break down the solution into clear, logical steps
-- Show all calculations
-- Explain the reasoning behind each step
-- Use proper mathematical notation
-- Include final answer verification when possible`,
+    math: `${basePrompt}
+
+For mathematical problems:
+- ans: Provide clear step-by-step solution with explanations using KaTeX syntax for math expressions
+- manimkatex: Create KaTeX for each step of the mathematical solution. Use format like:
+  "2x + 5 = 15\\\\2x = 15 - 5\\\\2x = 10\\\\x = 5"
+- tts: Create narration script explaining each mathematical step
+
+Example response:
+{
+  "ans": "To solve $2x + 5 = 15$, we first subtract $5$ from both sides to get $2x = 10$, then divide both sides by $2$ to get $x = 5$.",
+  "manimkatex": "2x + 5 = 15\\\\\\text{Subtract 5 from both sides}\\\\2x = 15 - 5\\\\2x = 10\\\\\\text{Divide both sides by 2}\\\\x = \\frac{10}{2}\\\\x = 5",
+  "tts": "Let's solve this step by step. We start with 2x plus 5 equals 15. First, we subtract 5 from both sides, giving us 2x equals 10. Then, we divide both sides by 2 to find that x equals 5."
+}`,
     
-    science: `${basePrompt} For science questions:
-- Explain concepts clearly with examples
-- Use analogies when helpful
-- Break down complex processes into steps
-- Include relevant formulas or equations
-- Connect to real-world applications`,
+    science: `${basePrompt}
+
+For science questions:
+- ans: Explain concepts clearly with examples and real-world applications using KaTeX for formulas
+- manimkatex: Create KaTeX for any formulas, equations, or scientific notation
+- tts: Create engaging narration that explains the scientific concepts
+
+Example for physics:
+{
+  "ans": "Newton's second law states that Force equals mass times acceleration: $F = ma$.",
+  "manimkatex": "F = ma\\\\\\text{where } F \\text{ is force}\\\\m \\text{ is mass}\\\\a \\text{ is acceleration}",
+  "tts": "Newton's second law is one of the fundamental principles of physics. It tells us that force equals mass times acceleration."
+}`,
     
-    coding: `${basePrompt} For programming questions:
-- Provide working code examples
-- Explain the logic behind the solution
-- Include comments in the code
-- Mention best practices
-- Explain any algorithms or data structures used`,
+    coding: `${basePrompt}
+
+For programming questions:
+- ans: Provide working code examples with clear explanations, use KaTeX for complexity notation
+- manimkatex: Use KaTeX for algorithms, complexity notation, or mathematical concepts in code
+- tts: Create narration explaining the code logic and implementation
+
+Example:
+{
+  "ans": "To sort an array, we can use the bubble sort algorithm with time complexity $O(n^2)$ in the worst case.",
+  "manimkatex": "\\text{Bubble Sort Complexity}\\\\\\text{Best Case: } O(n)\\\\\\text{Worst Case: } O(n^2)\\\\\\text{Average Case: } O(n^2)",
+  "tts": "Bubble sort is a simple sorting algorithm that repeatedly steps through the list and compares adjacent elements."
+}`,
     
-    history: `${basePrompt} For historical questions:
-- Provide chronological context
-- Explain causes and effects
-- Include relevant dates and figures
-- Connect events to broader historical themes
-- Use clear, narrative structure`,
+    history: `${basePrompt}
+
+For historical questions:
+- ans: Provide chronological context with dates, causes, and effects using KaTeX for dates/numbers
+- manimkatex: Use KaTeX for dates, timelines, or any numerical data
+- tts: Create engaging historical narrative
+
+Example:
+{
+  "ans": "World War II lasted from $1939$ to $1945$, spanning $6$ years of global conflict.",
+  "manimkatex": "\\text{World War II}\\\\1939 - 1945\\\\\\text{Duration: } 6 \\text{ years}",
+  "tts": "World War Two was a global conflict that lasted six years, from 1939 to 1945."
+}`,
     
-    general: `${basePrompt} For general questions:
-- Structure your answer logically
-- Use clear examples
-- Break down complex topics
-- Provide practical applications when relevant
-- Be friendly and conversational`
+    general: `${basePrompt}
+
+For general questions:
+- ans: Structure your answer logically with clear examples, use KaTeX for any math expressions
+- manimkatex: Use KaTeX for any mathematical concepts, formulas, or structured data
+- tts: Create conversational and engaging narration`
   };
 
   return subjectSpecificPrompts[subject] || subjectSpecificPrompts.general;

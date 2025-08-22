@@ -34,6 +34,12 @@ const generateVideo = async (question, answer, options = {}) => {
     console.log('   Response status:', response.status);
     console.log('   Response data:', response.data);
 
+    // Check if the Python server returned a failure response
+    if (!response.data.success) {
+      console.error('🔥 NODE.JS: Python server returned failure:', response.data.error);
+      throw new Error(`Video generation failed: ${response.data.error || 'Unknown error'}`);
+    }
+
     return response.data;
   } catch (error) {
     console.error('💥 NODE.JS Animation Service Error:', error.message);

@@ -16,6 +16,7 @@ router.use(authMiddleware);
 router.post('/', askQuestion);
 router.get('/', getQuestions);
 router.get('/:id', getQuestion);
+router.get('/:id/status', getQuestion);
 router.delete('/:id', deleteQuestion);
 router.post('/:id/generate-video', generateVideoForQuestion);
 

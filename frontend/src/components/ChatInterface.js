@@ -2,9 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useQuestions } from '../hooks/useQuestions';
 import { useAuth } from '../hooks/useAuth';
 import { toast } from 'react-toastify';
-import ReactMarkdown from 'react-markdown';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { tomorrow } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { InlineMath, BlockMath } from 'react-katex';
 import { 
   Send, 
@@ -33,6 +30,7 @@ function ChatInterface() {
   const [selectedSubject, setSelectedSubject] = useState('general');
   const [generateVideo, setGenerateVideo] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
+  const [videoPolling, setVideoPolling] = useState(new Set());
   const { askQuestion, generateVideo: generateVideoForQuestion, loading } = useQuestions();
   const { user } = useAuth();
   const messagesEndRef = useRef(null);
@@ -50,6 +48,74 @@ function ChatInterface() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Poll for video completion
+  useEffect(() => {
+    const pollVideos = async () => {
+      const processingMessages = messages.filter(msg => 
+        msg.status === 'processing' && msg.questionId && !videoPolling.has(msg.questionId)
+      );
+
+      processingMessages.forEach(async (msg) => {
+        setVideoPolling(prev => new Set(prev.add(msg.questionId)));
+        
+        const checkVideo = async () => {
+          try {
+            const response = await fetch(`/api/questions/${msg.questionId}/status`);
+            const data = await response.json();
+            
+            if (data.success) {
+              if (data.question.status === 'completed' && data.question.videoPath) {
+                // Update message with video
+                setMessages(prev => prev.map(m => 
+                  m.questionId === msg.questionId 
+                    ? { ...m, status: 'completed', videoPath: data.question.videoPath }
+                    : m
+                ));
+                setVideoPolling(prev => {
+                  const newSet = new Set(prev);
+                  newSet.delete(msg.questionId);
+                  return newSet;
+                });
+              } else if (data.question.status === 'failed') {
+                // Update message with error
+                setMessages(prev => prev.map(m => 
+                  m.questionId === msg.questionId 
+                    ? { ...m, status: 'failed' }
+                    : m
+                ));
+                setVideoPolling(prev => {
+                  const newSet = new Set(prev);
+                  newSet.delete(msg.questionId);
+                  return newSet;
+                });
+              }
+            }
+          } catch (error) {
+            console.error('Error checking video status:', error);
+          }
+        };
+
+        // Check immediately, then every 3 seconds
+        checkVideo();
+        const interval = setInterval(checkVideo, 3000);
+        
+        // Stop polling after 2 minutes
+        setTimeout(() => {
+          clearInterval(interval);
+          setVideoPolling(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(msg.questionId);
+            return newSet;
+          });
+        }, 120000);
+      });
+    };
+
+    if (messages.some(msg => msg.status === 'processing')) {
+      pollVideos();
+    }
+  }, [messages, videoPolling]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -106,12 +172,12 @@ function ChatInterface() {
           id: Date.now() + 2,
           type: 'bot',
           content: result.question.answer.text || 'No response received',
-          steps: result.question.answer.steps || [],
           timestamp: new Date(),
           subject: selectedSubject,
           questionId: result.question._id,
           videoRequested: generateVideo,
-          status: result.question.status
+          status: generateVideo ? 'processing' : result.question.status,
+          videoPath: result.question.videoPath || null
         };
 
         // Remove loading message and add bot response
@@ -193,6 +259,40 @@ function ChatInterface() {
     ]);
   };
 
+  // Function to render text with KaTeX support for $ and $$ syntax
+  const renderTextWithKaTeX = (text) => {
+    if (!text) return null;
+
+    // Split by display math first ($$...$$)
+    const parts = text.split(/(\$\$[\s\S]*?\$\$)/g);
+    
+    return parts.map((part, index) => {
+      if (part.startsWith('$$') && part.endsWith('$$')) {
+        // Display math
+        const math = part.slice(2, -2).trim();
+        return <BlockMath key={index} math={math} />;
+      } else {
+        // Process inline math ($...$) in the remaining text
+        const inlineParts = part.split(/(\$[^$\n]+?\$)/g);
+        return inlineParts.map((inlinePart, inlineIndex) => {
+          if (inlinePart.startsWith('$') && inlinePart.endsWith('$') && inlinePart.length > 2) {
+            // Inline math
+            const math = inlinePart.slice(1, -1);
+            return <InlineMath key={`${index}-${inlineIndex}`} math={math} />;
+          } else {
+            // Regular text - preserve line breaks
+            return inlinePart.split('\n').map((line, lineIndex) => (
+              <React.Fragment key={`${index}-${inlineIndex}-${lineIndex}`}>
+                {line}
+                {lineIndex < inlinePart.split('\n').length - 1 && <br />}
+              </React.Fragment>
+            ));
+          }
+        });
+      }
+    });
+  };
+
   const renderMessage = (message) => {
     const isUser = message.type === 'user';
     const subject = subjects.find(s => s.value === message.subject) || subjects[4];
@@ -242,76 +342,63 @@ function ChatInterface() {
               <p className="whitespace-pre-wrap">{message.content}</p>
             ) : (
               <div className="prose prose-sm max-w-none">
-                {message.steps && message.steps.length > 0 ? (
-                  <div className="space-y-3">
-                    {message.steps.map((step, index) => (
-                      <div key={index}>
-                        {step.type === 'equation' ? (
-                          <div className="my-2">
-                            <BlockMath math={step.content || ''} />
-                          </div>
-                        ) : step.type === 'code' ? (
-                          <SyntaxHighlighter
-                            language="javascript"
-                            style={tomorrow}
-                            className="rounded-md text-sm"
-                          >
-                            {step.content || ''}
-                          </SyntaxHighlighter>
-                        ) : (
-                          <ReactMarkdown
-                            components={{
-                              code: ({ inline, children, ...props }) => {
-                                if (inline) {
-                                  const text = children[0];
-                                  if (typeof text === 'string' && (text.includes('=') || text.includes('^') || text.includes('_'))) {
-                                    return <InlineMath math={text} />;
-                                  }
-                                  return <code className="bg-gray-200 px-1 py-0.5 rounded text-sm" {...props}>{children}</code>;
-                                }
-                                return (
-                                  <SyntaxHighlighter
-                                    language="javascript"
-                                    style={tomorrow}
-                                    className="rounded-md text-sm"
-                                  >
-                                    {children}
-                                  </SyntaxHighlighter>
-                                );
-                              }
-                            }}
-                          >
-                            {step.content || 'No content available'}
-                          </ReactMarkdown>
-                        )}
+                <div className="whitespace-pre-wrap">
+                  {renderTextWithKaTeX(message.content)}
+                </div>
+
+                {/* Video section */}
+                {message.videoRequested && (
+                  <div className="mt-4 border-t pt-4">
+                    {message.status === 'processing' && (
+                      <div className="flex items-center space-x-3 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-yellow-600 border-t-transparent"></div>
+                        <div>
+                          <div className="font-medium text-yellow-800">Creating video explanation...</div>
+                          <div className="text-sm text-yellow-600">This may take up to 2 minutes</div>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <ReactMarkdown
-                    components={{
-                      code: ({ inline, children, ...props }) => {
-                        if (inline) {
-                          const text = children[0];
-                          if (typeof text === 'string' && (text.includes('=') || text.includes('^') || text.includes('_'))) {
-                            return <InlineMath math={text} />;
-                          }
-                          return <code className="bg-gray-200 px-1 py-0.5 rounded text-sm" {...props}>{children}</code>;
-                        }
-                        return (
-                          <SyntaxHighlighter
-                            language="javascript"
-                            style={tomorrow}
-                            className="rounded-md text-sm"
+                    )}
+                    
+                    {message.status === 'completed' && message.videoPath && (
+                      <div className="bg-gray-50 rounded-lg p-4">
+                        <div className="flex items-center space-x-2 mb-3">
+                          <Video className="h-5 w-5 text-blue-600" />
+                          <h4 className="font-medium text-gray-900">Video Explanation</h4>
+                        </div>
+                        <video 
+                          controls 
+                          className="w-full max-w-2xl rounded-lg shadow-sm"
+                          preload="metadata"
+                        >
+                          <source src={`http://localhost:5000${message.videoPath}`} type="video/mp4" />
+                          Your browser does not support the video tag.
+                        </video>
+                        <div className="mt-2 flex items-center justify-between text-sm text-gray-500">
+                          <span>Generated using Manim mathematical animations</span>
+                          <a 
+                            href={`http://localhost:5000${message.videoPath}`} 
+                            download
+                            className="text-blue-600 hover:text-blue-700 flex items-center space-x-1"
                           >
-                            {children}
-                          </SyntaxHighlighter>
-                        );
-                      }
-                    }}
-                  >
-                    {message.content}
-                  </ReactMarkdown>
+                            <Download className="h-4 w-4" />
+                            <span>Download</span>
+                          </a>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {message.status === 'failed' && (
+                      <div className="flex items-center space-x-3 p-4 bg-red-50 rounded-lg border border-red-200">
+                        <div className="text-red-600">
+                          <Video className="h-6 w-6" />
+                        </div>
+                        <div>
+                          <div className="font-medium text-red-800">Video generation failed</div>
+                          <div className="text-sm text-red-600">Unable to create video explanation</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -341,21 +428,6 @@ function ChatInterface() {
                   <Video className="h-4 w-4" />
                 </button>
               )}
-
-              {message.status === 'processing' && (
-                <div className="flex items-center space-x-1 text-yellow-600">
-                  <div className="animate-spin rounded-full h-3 w-3 border-2 border-yellow-600 border-t-transparent"></div>
-                  <span className="text-xs">Generating video...</span>
-                </div>
-              )}
-
-              <button
-                onClick={() => copyToClipboard(message.content, `download-${message.id}`)}
-                className="text-green-600 hover:text-green-700 p-1 rounded"
-                title="Download as text"
-              >
-                <Download className="h-4 w-4" />
-              </button>
 
               <span className="text-xs text-gray-500">
                 {message.timestamp.toLocaleTimeString()}
