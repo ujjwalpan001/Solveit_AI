@@ -443,15 +443,25 @@ function ChatInterface() {
                           controls 
                           className="w-full max-w-2xl rounded-lg shadow-sm"
                           preload="metadata"
+                          crossOrigin="anonymous"
                         >
-                          <source src={`http://localhost:5000${message.videoPath}`} type="video/mp4" />
+                          {/* Use the streaming API for better video delivery */}
+                          <source 
+                            src={`/api/videos/stream/${encodeURIComponent(message.videoPath.split('/').pop())}`} 
+                            type="video/mp4" 
+                          />
+                          {/* Fallback to direct path if streaming API fails */}
+                          <source 
+                            src={message.videoPath.startsWith('/') ? message.videoPath : `/${message.videoPath}`} 
+                            type="video/mp4" 
+                          />
                           Your browser does not support the video tag.
                         </video>
                         <div className="mt-2 flex items-center justify-between text-sm text-gray-500">
                           <span>Generated using Manim mathematical animations</span>
                           <a 
-                            href={`http://localhost:5000${message.videoPath}`} 
-                            download
+                            href={`/api/videos/stream/${encodeURIComponent(message.videoPath.split('/').pop())}`}
+                            download={message.videoPath.split('/').pop()}
                             className="text-blue-600 hover:text-blue-700 flex items-center space-x-1"
                           >
                             <Download className="h-4 w-4" />

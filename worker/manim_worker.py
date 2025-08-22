@@ -188,13 +188,16 @@ class MathAnimationScene(Scene):
             return
         
         try:
+            # Preprocess KaTeX content to handle delimiters and common issues
+            preprocessed_content = self.preprocess_katex_content(self.katex_content)
+            
             # Split KaTeX content by [STEP] markers for synchronized animation
-            katex_steps = self.katex_content.split('\\\\[STEP]')
+            katex_steps = preprocessed_content.split('\\\\[STEP]')
             
             # Clean and prepare each step
             cleaned_steps = []
             for step in katex_steps:
-                cleaned_step = step.strip()
+                cleaned_step = self.sanitize_step(step.strip())
                 if cleaned_step:
                     cleaned_steps.append(cleaned_step)
             
@@ -245,13 +248,27 @@ class MathAnimationScene(Scene):
                         
                 except Exception as step_error:
                     print(f"   ❌ Error rendering step {i+1}: {step_error}")
-                    # Fallback to text for problematic KaTeX
-                    fallback_text = Text(f"Step {i+1}: {katex_step}", font_size=24, color=RED)
-                    fallback_text.move_to([0, current_y, 0])
-                    self.play(Write(fallback_text), run_time=timing['animation_time'])
-                    if timing['wait_after'] > 0:
-                        self.wait(timing['wait_after'])
-                    current_y -= 0.6
+                    # Try to fix common LaTeX errors in this specific step
+                    try:
+                        fixed_step = self.fix_latex_step(katex_step)
+                        math_obj = MathTex(fixed_step, font_size=36, color=YELLOW)
+                        math_obj.move_to([0, current_y, 0])
+                        self.play(Write(math_obj), run_time=timing['animation_time'])
+                        if timing['wait_after'] > 0:
+                            self.wait(timing['wait_after'])
+                        previous_equations.append(math_obj)
+                        current_y -= 0.8
+                        print(f"   ✅ Fixed and rendered step {i+1}")
+                    except Exception as fallback_error:
+                        # Final fallback to text for problematic KaTeX
+                        print(f"   ⚠️ Fallback to text for step {i+1}: {fallback_error}")
+                        short_katex = katex_step[:30] + "..." if len(katex_step) > 30 else katex_step
+                        fallback_text = Text(f"Step {i+1}: {short_katex}", font_size=24, color=RED)
+                        fallback_text.move_to([0, current_y, 0])
+                        self.play(Write(fallback_text), run_time=timing['animation_time'])
+                        if timing['wait_after'] > 0:
+                            self.wait(timing['wait_after'])
+                        current_y -= 0.6
             
             # Final pause to ensure video matches audio duration exactly
             if hasattr(self, 'final_pause'):
@@ -269,6 +286,113 @@ class MathAnimationScene(Scene):
             error_text.move_to(ORIGIN)
             self.play(Write(error_text))
             self.wait(2)
+    
+    def preprocess_katex_content(self, content: str) -> str:
+        """
+        Pre-process KaTeX content to handle common issues before splitting into steps
+        """
+        # Try to import latex_fixer locally if available
+        try:
+            from latex_fixer import fix_common_latex_errors, preprocess_latex_content
+            # Use the specialized LaTeX fixer first
+            content = preprocess_latex_content(content)
+            content = fix_common_latex_errors(content)
+        except ImportError:
+            # Basic fixes if latex_fixer is not available
+            pass
+        
+        # Handle common dollar sign math delimiters
+        if '$' in content:
+            # Remove standalone $ delimiters, as MathTex already interprets content as math
+            import re
+            
+            # Replace $...$ with just the content inside
+            content = re.sub(r'\$([^$]+)\$', r'\1', content)
+            
+            # Handle more complex nested dollar signs that may indicate environments
+            content = re.sub(r'\$\$(.*?)\$\$', r'\\begin{align} \1 \\end{align}', content)
+            
+            print("   🔄 Converted dollar sign delimiters in LaTeX content")
+        
+        # Fix missing end braces in environments
+        environments = ['cases', 'matrix', 'pmatrix', 'bmatrix', 'align', 'gathered', 'align*']
+        for env in environments:
+            if f'\\begin{{{env}}}' in content and f'\\end{{{env}}}' not in content:
+                content += f'\\end{{{env}}}'
+                print(f"   ⚠️ Added missing \\end{{{env}}}")
+        
+        # Balance braces
+        open_braces = content.count('{')
+        close_braces = content.count('}')
+        if open_braces > close_braces:
+            content += '}' * (open_braces - close_braces)
+            print(f"   ⚠️ Added {open_braces - close_braces} missing closing braces")
+        
+        return content
+    
+    def sanitize_step(self, step: str) -> str:
+        """
+        Clean and sanitize an individual KaTeX step
+        """
+        # Skip empty steps
+        if not step or step.isspace():
+            return ""
+            
+        # Fix common issues with cases environment
+        if '\\begin{cases}' in step:
+            # Ensure each case ends with \\
+            import re
+            step = re.sub(r'([^\\])\s*&', r'\1 &', step)  # Fix spacing around &
+            step = re.sub(r'([^\\])\s*\n', r'\1\\\\\n', step)  # Add \\ for line breaks
+            
+            # Fix specific pattern common in cases
+            if '\\text{if}' in step and '\\\\' not in step:
+                step = step.replace('\\text{if}', '\\\\ \\text{if}')
+        
+        # Handle align environment
+        if '\\begin{align' in step:
+            # Ensure align has proper line breaks
+            import re
+            step = re.sub(r'([^\\])\s*\n', r'\1\\\\\n', step)
+            
+            # Fix align vs align* mismatch
+            if '\\begin{align}' in step and '\\end{align*}' in step:
+                step = step.replace('\\begin{align}', '\\begin{align*}')
+            elif '\\begin{align*}' in step and '\\end{align}' in step:
+                step = step.replace('\\end{align}', '\\end{align*}')
+        
+        return step
+    
+    def fix_latex_step(self, step: str) -> str:
+        """
+        Attempt to fix common LaTeX errors in a single step
+        """
+        # Try common fixes for LaTeX errors
+        fixed = step
+        
+        # 1. Fix unescaped special characters
+        special_chars = ['&', '%', '$', '#', '_', '{', '}']
+        for char in special_chars:
+            if char in fixed and f'\\{char}' not in fixed and not (char == '{' or char == '}'):
+                fixed = fixed.replace(char, f'\\{char}')
+        
+        # 2. Fix common environment issues
+        if '\\begin{cases}' in fixed:
+            # Make sure each case ends with \\
+            if '&' in fixed and '\\\\' not in fixed:
+                fixed = fixed.replace('&', '& \\\\ ')
+        
+        # 3. Try simplifying complex expressions
+        if len(fixed) > 100:  # If expression is very long, simplify
+            # Extract the core equation, skipping environment tags
+            import re
+            core_match = re.search(r'\\begin\{[^}]+\}(.*?)\\end\{[^}]+\}', fixed)
+            if core_match:
+                # Just use the core content with simpler formatting
+                core = core_match.group(1)
+                fixed = core.strip()
+        
+        return fixed
     
     def split_text(self, text: str, max_length: int) -> List[str]:
         words = text.split()
@@ -393,6 +517,36 @@ def execute_manim_python_code(manim_code: str, output_path: str, tts_script: str
         # Clean up the code
         cleaned_code = manim_code.strip()
         
+        # Import and use the LaTeX preprocessor
+        from latex_fixer import fix_common_latex_errors, preprocess_latex_content
+        
+        # Apply LaTeX preprocessing
+        print("   🧹 Preprocessing LaTeX content...")
+        try:
+            cleaned_code = fix_common_latex_errors(cleaned_code)
+            
+            # Additional sanitization for $x = 2$ style inputs that might be causing issues
+            if '$' in cleaned_code:
+                print("   🔍 Detected dollar sign math delimiters, ensuring they're properly formatted")
+                # Replace all standalone math expressions with MathTex
+                import re
+                dollar_math = re.findall(r'\$(.*?)\$', cleaned_code)
+                for math in dollar_math:
+                    if len(math.strip()) > 0:
+                        # Check if this is already inside a MathTex
+                        if not re.search(r'MathTex\([\'"][^\'"]*' + re.escape(math) + r'[^\'"]*[\'"]\)', cleaned_code):
+                            # Replace with proper MathTex
+                            cleaned_code = cleaned_code.replace(
+                                f"${math}$", 
+                                f'MathTex(r"{math}")'
+                            )
+                            print(f"   🔄 Converted ${math}$ to MathTex")
+            
+            print("   ✅ LaTeX preprocessing completed")
+        except Exception as latex_error:
+            print(f"   ⚠️ Error during LaTeX preprocessing: {latex_error}")
+            # Continue with original code if preprocessing fails
+        
         # Ensure the code has the necessary import
         if not cleaned_code.startswith('from manim import'):
             cleaned_code = 'from manim import *\n\n' + cleaned_code
@@ -412,41 +566,295 @@ def execute_manim_python_code(manim_code: str, output_path: str, tts_script: str
         }
         
         # Execute the code to define the scene classes
-        exec(cleaned_code, globals_dict)
+        try:
+            exec(cleaned_code, globals_dict)
+        except SyntaxError as syntax_ex:
+            print(f"   ⚠️ Syntax error in code execution: {syntax_ex}")
+            
+            # Try with additional LaTeX fixes
+            try:
+                # More aggressive LaTeX fixes for common errors
+                import re
+                cleaned_code = cleaned_code.replace("\\\\", "\\\\\\\\")  # Double escaping backslashes
+                cleaned_code = re.sub(r'(\\text{[^}]*})', lambda m: m.group(1).replace(' ', '~'), cleaned_code)
+                print(f"   🔄 Attempting with additional LaTeX fixes...")
+                exec(cleaned_code, globals_dict)
+            except Exception as ex:
+                print(f"   ⚠️ Failed with additional fixes: {ex}")
+                use_fallback = True
+            
+        except Exception as code_ex:
+            print(f"   ⚠️ Error in code execution: {code_ex}")
+            use_fallback = True
+            
+        # Fallback if all attempts failed
+        if 'use_fallback' in locals() and use_fallback:
+            # Try a fallback simple scene to generate at least something
+            fallback_code = '''
+from manim import *
+
+class FallbackScene(Scene):
+    def construct(self):
+        title = Text("Math Animation", font_size=40)
+        self.play(Write(title))
+        self.wait(1)
+        self.play(title.animate.to_edge(UP))
+        
+        error_text = Text("Could not render the original animation.", font_size=24, color=RED)
+        error_text.next_to(title, DOWN, buff=0.5)
+        self.play(Write(error_text))
+        self.wait(1)
+        
+        math_text = MathTex("f(x) = ax^2 + bx + c")
+        math_text.next_to(error_text, DOWN, buff=0.8)
+        self.play(Write(math_text))
+        self.wait(2)
+'''
+            print("   🔄 Using fallback scene...")
+            try:
+                exec(fallback_code, globals_dict)
+                use_fallback = True
+            except Exception as fallback_ex:
+                print(f"   ❌ Even fallback scene failed: {fallback_ex}")
+                return False
         
         # Find all Scene classes defined in the code
         scene_classes = []
-        for name, obj in globals_dict.items():
-            if (isinstance(obj, type) and 
-                hasattr(obj, '__bases__') and 
-                any('Scene' in str(base) for base in obj.__bases__) and
-                name not in ['Scene', 'MovingCameraScene', 'ThreeDScene', 'SpecialThreeDScene', 
-                            'VectorScene', 'LinearTransformationScene', 'ZoomedScene'] and
-                not name.startswith('_')):  # Exclude built-in scene classes
-                scene_classes.append(obj)
-                print(f"   🎭 Found user-defined scene class: {name}")
+        from manim import Scene
+        
+        # Check if we're using fallback
+        if 'use_fallback' in locals() and use_fallback:
+            # Try to find the FallbackScene
+            fallback_class = globals_dict.get('FallbackScene')
+            if fallback_class:
+                scene_classes = [fallback_class]
+                print(f"   🎭 Using fallback scene class: FallbackScene")
+        else:
+            # Try to find user-defined scenes
+            try:
+                for name, obj in globals_dict.items():
+                    try:
+                        if (isinstance(obj, type) and 
+                            hasattr(obj, '__bases__') and
+                            # Check both ways to find Scene subclasses
+                            (any('Scene' in str(base) for base in obj.__bases__) or
+                             issubclass(obj, Scene)) and
+                            name not in ['Scene', 'MovingCameraScene', 'ThreeDScene', 'SpecialThreeDScene', 
+                                        'VectorScene', 'LinearTransformationScene', 'ZoomedScene'] and
+                            not name.startswith('_')):  # Exclude built-in scene classes
+                            scene_classes.append(obj)
+                            print(f"   🎭 Found user-defined scene class: {name}")
+                    except TypeError:
+                        # Skip non-type objects
+                        continue
+            except Exception as scene_error:
+                print(f"   ⚠️ Error searching for scene classes: {scene_error}")
         
         if not scene_classes:
-            print("   ❌ No user-defined Scene classes found in the code")
-            return False
+            print("   ⚠️ No user-defined Scene classes found in the code")
+            print("   🔄 Creating basic scene class...")
+            try:
+                # Create a basic scene class with the original code embedded as a comment
+                basic_code = """
+from manim import *
+
+class BasicScene(Scene):
+    def construct(self):
+        title = Text("Math Animation", font_size=40)
+        self.play(Write(title))
+        self.wait(1)
+        self.play(title.animate.to_edge(UP))
         
-        # Use the first user-defined scene class found
+        # Try to display some math expressions
+        try:
+            math_text = MathTex("f(x) = ax^2 + bx + c")
+            math_text.next_to(title, DOWN, buff=1.0)
+            self.play(Write(math_text))
+            self.wait(2)
+        except Exception:
+            error_text = Text("Could not render LaTeX expressions", font_size=24, color=RED)
+            error_text.next_to(title, DOWN, buff=1.0)
+            self.play(Write(error_text))
+            self.wait(2)
+"""
+                exec(basic_code, globals_dict)
+                basic_class = globals_dict.get('BasicScene')
+                if basic_class:
+                    scene_classes = [basic_class]
+                    print(f"   🎭 Created and using BasicScene class")
+                else:
+                    print(f"   ❌ Failed to create BasicScene")
+                    return False
+            except Exception as basic_ex:
+                print(f"   ❌ Error creating basic scene: {basic_ex}")
+                return False
+        
+        # Use the first scene class found (or fallback/basic scene)
         SceneClass = scene_classes[0]
         print(f"   🎬 Using scene class: {SceneClass.__name__}")
         
         # Create and render the scene
         scene = SceneClass()
-        scene.render()
+        try:
+            # Attempt to render the scene with error handling
+            scene.render()
+        except Exception as render_error:
+            error_msg = str(render_error).lower()
+            if "latex" in error_msg or "tex" in error_msg:
+                print(f"   ⚠️ LaTeX error during rendering: {render_error}")
+                
+                # Try one more attempt with simplified LaTeX
+                print("   🔄 Attempting with simplified LaTeX...")
+                try:
+                    # Analyze the error
+                    specific_error = ""
+                    if "illegal parameter" in error_msg:
+                        specific_error = "Illegal parameter in LaTeX command"
+                    elif "missing" in error_msg and "$" in error_msg:
+                        specific_error = "Missing LaTeX delimiter"
+                    elif "undefined control sequence" in error_msg:
+                        specific_error = "Undefined LaTeX command"
+                    else:
+                        specific_error = "LaTeX syntax error"
+                    
+                    # Extract the problematic expression from the error if possible
+                    problematic_expression = ""
+                    if "Missing } inserted" in str(render_error):
+                        # Find the line with unbalanced braces
+                        import re
+                        brace_match = re.search(r'\\begin{cases}(.*?)\\end{cases}', manim_code, re.DOTALL)
+                        if brace_match:
+                            problematic_expression = brace_match.group(0)[:50] + "..."
+                        else:
+                            problematic_expression = "Unbalanced braces in LaTeX expression"
+                    elif "Undefined control sequence" in str(render_error):
+                        # Try to extract the undefined command
+                        import re
+                        cmd_match = re.search(r'Undefined control sequence\\([a-zA-Z]+)', str(render_error))
+                        if cmd_match:
+                            problematic_expression = f"Unknown command: \\{cmd_match.group(1)}"
+                        else:
+                            problematic_expression = "Unknown LaTeX command"
+                    
+                    # Create a scene that shows the error but still produces a video
+                    error_code = f"""
+from manim import *
+
+class LaTeXErrorScene(Scene):
+    def construct(self):
+        title = Text("LaTeX Rendering Error", color=RED, font_size=40)
+        self.play(Write(title))
+        self.wait(1)
+        self.play(title.animate.to_edge(UP))
         
+        error_text = Text("{specific_error}", font_size=24, color=ORANGE)
+        error_text.next_to(title, DOWN, buff=0.5)
+        self.play(Write(error_text))
+        self.wait(1)
+        
+        # Show the problematic expression (if identified)
+        if "{problematic_expression}":
+            problem_text = Text("Problem area: {problematic_expression}", font_size=20, color=YELLOW)
+            problem_text.next_to(error_text, DOWN, buff=0.5)
+            self.play(Write(problem_text))
+            self.wait(1)
+        
+        # Show a simple expression that will definitely work
+        simple_math = MathTex("f(x) = ax^2 + bx + c")
+        simple_math.next_to(error_text, DOWN, buff=1.5)
+        self.play(Write(simple_math))
+        self.wait(1)
+        
+        # Common fixes suggestions
+        fixes = VGroup(
+            Text("Common fixes:", font_size=22, color=GREEN),
+            Text("1. Ensure all braces are balanced", font_size=18),
+            Text("2. Use \\\\ for line breaks in cases environments", font_size=18),
+            Text("3. Simplify complex expressions", font_size=18)
+        )
+        fixes.arrange(DOWN, aligned_edge=LEFT, buff=0.2)
+        fixes.next_to(simple_math, DOWN, buff=0.8)
+        self.play(Write(fixes))
+        self.wait(2)
+"""
+                    exec(error_code, globals_dict)
+                    error_scene = globals_dict.get('LaTeXErrorScene')()
+                    error_scene.render()
+                    
+                    # Set flag to use the error scene's output
+                    use_error_scene = True
+                    
+                except Exception as error_scene_ex:
+                    print(f"   ❌ Error scene failed: {error_scene_ex}")
+                    # Create a very simple scene without LaTeX as last resort
+                    simple_code = """
+from manim import *
+
+class SimpleScene(Scene):
+    def construct(self):
+        title = Text("Unable to render LaTeX", color=RED, font_size=40)
+        self.play(Write(title))
+        self.wait(1)
+        
+        # Give more specific information about the error
+        error_detail = Text("Syntax error in mathematical expressions", font_size=24, color=ORANGE)
+        error_detail.next_to(title, DOWN, buff=0.5)
+        self.play(Write(error_detail))
+        self.wait(1)
+        
+        # Show basic formula as example
+        text = Text("Example of correct syntax:", font_size=20)
+        text.next_to(error_detail, DOWN, buff=0.8)
+        self.play(Write(text))
+        self.wait(0.5)
+        
+        # Show examples of correctly formatted LaTeX
+        examples = VGroup(
+            Tex(r"\\text{Basic formula: } f(x) = x^2 + 2x + 1"),
+            Tex(r"\\text{Fraction: } \\frac{a}{b} + \\frac{c}{d}"),
+            Tex(r"\\text{Cases: } f(x) = \\begin{cases} x^2 & x > 0 \\\\ -x^2 & x \\leq 0 \\end{cases}")
+        )
+        examples.arrange(DOWN, buff=0.5)
+        examples.next_to(text, DOWN, buff=0.5)
+        self.play(Write(examples[0]))
+        self.wait(0.5)
+        self.play(Write(examples[1]))
+        self.wait(0.5)
+        self.play(Write(examples[2]))
+        self.wait(2)
+"""
+                    exec(simple_code, globals_dict)
+                    simple_scene = globals_dict.get('SimpleScene')()
+                    simple_scene.render()
+                    # Set flag to use simple scene
+                    use_simple_scene = True
+            else:
+                # Re-raise non-LaTeX errors
+                raise render_error
+                
         # Find the rendered video file
-        scene_name = SceneClass.__name__
-        rendered_files = list(UPLOAD_DIR.glob(f"{scene_name}*.mp4"))
+        import time
+        
+        # Check if we're using error or fallback scenes
+        if 'use_error_scene' in locals() and use_error_scene:
+            rendered_files = list(UPLOAD_DIR.glob("LaTeXErrorScene*.mp4"))
+            print("   🔍 Looking for error scene video file")
+        elif 'use_simple_scene' in locals() and use_simple_scene:
+            rendered_files = list(UPLOAD_DIR.glob("SimpleScene*.mp4"))
+            print("   🔍 Looking for simple scene video file")
+        else:
+            # Normal case - look for the rendered scene
+            scene_name = SceneClass.__name__
+            rendered_files = list(UPLOAD_DIR.glob(f"{scene_name}*.mp4"))
+            print(f"   🔍 Looking for main scene video file: {scene_name}*.mp4")
         
         if not rendered_files:
-            # Try to find any recently created MP4 files
+            # Try to find any recently created MP4 files as fallback
+            print("   ⚠️ No specific scene file found, checking recent videos...")
             rendered_files = list(UPLOAD_DIR.glob("*.mp4"))
             if rendered_files:
                 rendered_files = [f for f in rendered_files if f.stat().st_mtime > (time.time() - 60)]
+                print(f"   🔍 Found {len(rendered_files)} recent MP4 files")
         
         if rendered_files:
             # Move the most recent file to the target path

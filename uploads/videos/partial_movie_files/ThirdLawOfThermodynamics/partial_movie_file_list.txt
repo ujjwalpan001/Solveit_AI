@@ -1,0 +1,12 @@
+# This file is used internally by FFMPEG.
+file 'file:D:/VScode/CodeSpark/aitutor/uploads/videos/partial_movie_files/ThirdLawOfThermodynamics/2016333726_1753053604_223132457.mp4'
+file 'file:D:/VScode/CodeSpark/aitutor/uploads/videos/partial_movie_files/ThirdLawOfThermodynamics/543634251_4071516364_4167426994.mp4'
+file 'file:D:/VScode/CodeSpark/aitutor/uploads/videos/partial_movie_files/ThirdLawOfThermodynamics/543634251_2925859933_1938884052.mp4'
+file 'file:D:/VScode/CodeSpark/aitutor/uploads/videos/partial_movie_files/ThirdLawOfThermodynamics/543634251_1750416366_3352632337.mp4'
+file 'file:D:/VScode/CodeSpark/aitutor/uploads/videos/partial_movie_files/ThirdLawOfThermodynamics/543634251_2341082278_304014414.mp4'
+file 'file:D:/VScode/CodeSpark/aitutor/uploads/videos/partial_movie_files/ThirdLawOfThermodynamics/543634251_2998245612_2006982757.mp4'
+file 'file:D:/VScode/CodeSpark/aitutor/uploads/videos/partial_movie_files/ThirdLawOfThermodynamics/543634251_4071516364_779935062.mp4'
+file 'file:D:/VScode/CodeSpark/aitutor/uploads/videos/partial_movie_files/ThirdLawOfThermodynamics/543634251_4133122310_1288367395.mp4'
+file 'file:D:/VScode/CodeSpark/aitutor/uploads/videos/partial_movie_files/ThirdLawOfThermodynamics/543634251_4071516364_803933691.mp4'
+file 'file:D:/VScode/CodeSpark/aitutor/uploads/videos/partial_movie_files/ThirdLawOfThermodynamics/543634251_3303506866_696722427.mp4'
+file 'file:D:/VScode/CodeSpark/aitutor/uploads/videos/partial_movie_files/ThirdLawOfThermodynamics/543634251_4247107814_4134950981.mp4'
