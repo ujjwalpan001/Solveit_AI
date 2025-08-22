@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useQuestions } from '../hooks/useQuestions';
 import { useAuth } from '../hooks/useAuth';
+import { useConversations } from '../context/ConversationContext';
+import ConversationSidebar from './ConversationSidebar';
 import { toast } from 'react-toastify';
 import { InlineMath, BlockMath } from 'react-katex';
 import { 
@@ -13,10 +15,14 @@ import {
   BookOpen,
   Trash2,
   Copy,
-  Check
+  Check,
+  Menu,
+  PanelLeftClose
 } from 'lucide-react';
 
 function ChatInterface() {
+  const { currentConversation, setCurrentConversation, getConversationWithQuestions } = useConversations();
+  
   const [messages, setMessages] = useState([
     {
       id: 1,
@@ -31,9 +37,69 @@ function ChatInterface() {
   const [generateVideo, setGenerateVideo] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
   const [videoPolling, setVideoPolling] = useState(new Set());
+  const [showSidebar, setShowSidebar] = useState(true);
   const { askQuestion, generateVideo: generateVideoForQuestion, loading } = useQuestions();
   const { user } = useAuth();
   const messagesEndRef = useRef(null);
+
+  // Handle conversation selection
+  const handleSelectConversation = async (conversation) => {
+    setCurrentConversation(conversation);
+    
+    if (conversation) {
+      try {
+        const data = await getConversationWithQuestions(conversation._id);
+        const conversationMessages = data.questions?.map(q => ([
+          {
+            id: `q-${q._id}`,
+            questionId: q._id,
+            type: 'user',
+            content: q.question,
+            timestamp: new Date(q.createdAt),
+            subject: q.subject
+          },
+          {
+            id: `a-${q._id}`,
+            questionId: q._id,
+            type: 'bot',
+            content: q.answer.text || 'No answer available',
+            steps: q.answer.steps,
+            timestamp: new Date(q.createdAt),
+            subject: q.subject,
+            status: q.status,
+            videoPath: q.videoPath
+          }
+        ])).flat() || [];
+        
+        setMessages([
+          {
+            id: 1,
+            type: 'bot',
+            content: "Hello! I'm your AI tutor. I can help you with math, science, programming, history, and many other topics. Just ask me anything!",
+            timestamp: new Date(),
+            subject: 'general'
+          },
+          ...conversationMessages
+        ]);
+        
+        setSelectedSubject(conversation.subject);
+      } catch (error) {
+        console.error('Failed to load conversation:', error);
+        toast.error('Failed to load conversation');
+      }
+    } else {
+      // Reset to default welcome message
+      setMessages([
+        {
+          id: 1,
+          type: 'bot',
+          content: "Hello! I'm your AI tutor. I can help you with math, science, programming, history, and many other topics. Just ask me anything!",
+          timestamp: new Date(),
+          subject: 'general'
+        }
+      ]);
+    }
+  };
   const textareaRef = useRef(null);
 
   const subjects = [
@@ -61,15 +127,19 @@ function ChatInterface() {
         
         const checkVideo = async () => {
           try {
+            console.log(`🔍 Polling video status for question: ${msg.questionId}`);
             const response = await fetch(`/api/questions/${msg.questionId}/status`);
             const data = await response.json();
+            console.log(`📊 Poll response for ${msg.questionId}:`, data);
             
             if (data.success) {
-              if (data.question.status === 'completed' && data.question.videoPath) {
+              const question = data.data?.question || data.question; // Handle both formats
+              if (question.status === 'completed' && question.videoPath) {
+                console.log(`✅ Video completed for ${msg.questionId}:`, question.videoPath);
                 // Update message with video
                 setMessages(prev => prev.map(m => 
                   m.questionId === msg.questionId 
-                    ? { ...m, status: 'completed', videoPath: data.question.videoPath }
+                    ? { ...m, status: 'completed', videoPath: question.videoPath }
                     : m
                 ));
                 setVideoPolling(prev => {
@@ -77,7 +147,8 @@ function ChatInterface() {
                   newSet.delete(msg.questionId);
                   return newSet;
                 });
-              } else if (data.question.status === 'failed') {
+              } else if (question.status === 'failed') {
+                console.log(`❌ Video failed for ${msg.questionId}`);
                 // Update message with error
                 setMessages(prev => prev.map(m => 
                   m.questionId === msg.questionId 
@@ -89,7 +160,11 @@ function ChatInterface() {
                   newSet.delete(msg.questionId);
                   return newSet;
                 });
+              } else {
+                console.log(`⏳ Video still processing for ${msg.questionId}, status: ${question.status}`);
               }
+            } else {
+              console.error(`❌ Failed to get status for ${msg.questionId}:`, data.message);
             }
           } catch (error) {
             console.error('Error checking video status:', error);
@@ -159,6 +234,7 @@ function ChatInterface() {
       const result = await askQuestion({
         question: inputMessage,
         subject: selectedSubject,
+        conversationId: currentConversation?._id,
         generateVideo
       });
 
@@ -448,21 +524,56 @@ function ChatInterface() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto h-screen flex flex-col">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-600 to-purple-600 flex items-center justify-center">
-            <Sparkles className="h-6 w-6 text-white" />
+    <div className="h-screen flex">
+      {/* Conversation Sidebar */}
+      {showSidebar && (
+        <ConversationSidebar
+          onSelectConversation={handleSelectConversation}
+          selectedConversationId={currentConversation?._id}
+        />
+      )}
+      
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            {!showSidebar && (
+              <button
+                onClick={() => setShowSidebar(true)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Show conversations"
+              >
+                <Menu className="h-5 w-5 text-gray-600" />
+              </button>
+            )}
+            <div className="w-10 h-10 rounded-full bg-gradient-to-r from-blue-600 to-purple-600 flex items-center justify-center">
+              <Sparkles className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold text-gray-900">
+                {currentConversation ? currentConversation.title : 'AI Tutor Chat'}
+              </h1>
+              <p className="text-sm text-gray-500">
+                {currentConversation 
+                  ? `${currentConversation.questionCount} questions in this conversation`
+                  : 'Ask anything, get detailed explanations'
+                }
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">AI Tutor Chat</h1>
-            <p className="text-sm text-gray-500">Ask anything, get detailed explanations</p>
-          </div>
-        </div>
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={clearChat}
+          <div className="flex items-center space-x-2">
+            {showSidebar && (
+              <button
+                onClick={() => setShowSidebar(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Hide conversations"
+              >
+                <PanelLeftClose className="h-5 w-5 text-gray-600" />
+              </button>
+            )}
+            <button
+              onClick={clearChat}
             className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md"
             title="Clear chat"
           >
@@ -557,6 +668,7 @@ function ChatInterface() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

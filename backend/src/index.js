@@ -9,6 +9,7 @@ const jobQueue = require('./jobs/jobQueue');
 // Routes
 const authRoutes = require('./routes/authRoutes');
 const questionRoutes = require('./routes/questionRoutes');
+const conversationRoutes = require('./routes/conversationRoutes');
 const userRoutes = require('./routes/userRoutes');
 
 const app = express();
@@ -27,6 +28,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/questions', questionRoutes);
+app.use('/api/conversations', conversationRoutes);
 app.use('/api/users', userRoutes);
 
 // Health check

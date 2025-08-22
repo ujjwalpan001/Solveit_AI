@@ -6,6 +6,11 @@ const questionSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  conversationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Conversation',
+    required: true
+  },
   question: {
     type: String,
     required: true,
@@ -71,6 +76,7 @@ const questionSchema = new mongoose.Schema({
 
 // Index for efficient searching
 questionSchema.index({ userId: 1, createdAt: -1 });
+questionSchema.index({ conversationId: 1, createdAt: 1 });
 questionSchema.index({ subject: 1 });
 questionSchema.index({ status: 1 });
 

@@ -1,11 +1,12 @@
 const Question = require('../models/Question');
+const Conversation = require('../models/Conversation');
 const llmService = require('../services/llmService');
 const jobQueue = require('../jobs/jobQueue');
 
 const askQuestion = async (req, res) => {
   try {
     console.log('Ask question request received:', req.body);
-    const { question, subject, generateVideo = false } = req.body;
+    const { question, subject, conversationId, generateVideo = false } = req.body;
 
     if (!question || !subject) {
       console.log('Missing question or subject');
@@ -13,6 +14,32 @@ const askQuestion = async (req, res) => {
         success: false,
         message: 'Question and subject are required'
       });
+    }
+
+    let conversation;
+    
+    // If conversationId provided, validate it exists and belongs to user
+    if (conversationId) {
+      conversation = await Conversation.findOne({
+        _id: conversationId,
+        userId: req.user._id
+      });
+      
+      if (!conversation) {
+        return res.status(404).json({
+          success: false,
+          message: 'Conversation not found'
+        });
+      }
+    } else {
+      // Create new conversation if none provided
+      conversation = new Conversation({
+        userId: req.user._id,
+        subject,
+        lastActivityAt: new Date()
+      });
+      await conversation.save();
+      console.log('New conversation created automatically:', conversation._id);
     }
 
     console.log('Generating answer for question:', question, 'subject:', subject);
@@ -23,6 +50,7 @@ const askQuestion = async (req, res) => {
     // Create question document
     const questionDoc = new Question({
       userId: req.user._id,
+      conversationId: conversation._id,
       question,
       subject,
       answer,
@@ -32,6 +60,12 @@ const askQuestion = async (req, res) => {
 
     await questionDoc.save();
     console.log('Question saved to database');
+
+    // Update conversation stats
+    await Conversation.findByIdAndUpdate(conversation._id, {
+      $inc: { questionCount: 1 },
+      $set: { lastActivityAt: new Date() }
+    });
 
     // Add to job queue if video generation is requested
     if (generateVideo) {
@@ -48,7 +82,8 @@ const askQuestion = async (req, res) => {
       success: true,
       message: 'Question processed successfully',
       data: {
-        question: questionDoc
+        question: questionDoc,
+        conversation: conversation
       }
     });
   } catch (error) {
@@ -63,9 +98,13 @@ const askQuestion = async (req, res) => {
 
 const getQuestions = async (req, res) => {
   try {
-    const { page = 1, limit = 10, subject, search } = req.query;
+    const { page = 1, limit = 10, subject, search, conversationId } = req.query;
 
     const query = { userId: req.user._id };
+    
+    if (conversationId) {
+      query.conversationId = conversationId;
+    }
     
     if (subject && subject !== 'all') {
       query.subject = subject;
@@ -79,6 +118,7 @@ const getQuestions = async (req, res) => {
     }
 
     const questions = await Question.find(query)
+      .populate('conversationId', 'title subject')
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit)
@@ -111,13 +151,23 @@ const getQuestions = async (req, res) => {
 const getQuestion = async (req, res) => {
   try {
     const { id } = req.params;
+    console.log(`📊 Getting question/status for ID: ${id}`);
 
     const question = await Question.findOne({
       _id: id,
       userId: req.user._id
+    }).populate('conversationId', 'title subject');
+
+    console.log(`📈 Question found:`, {
+      id: question?._id,
+      status: question?.status,
+      videoPath: question?.videoPath,
+      conversationId: question?.conversationId,
+      exists: !!question
     });
 
     if (!question) {
+      console.log(`❌ Question not found for ID: ${id}`);
       return res.status(404).json({
         success: false,
         message: 'Question not found'
