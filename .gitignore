@@ -5,7 +5,7 @@ node_modules/
 # Production builds
 build/
 dist/
-
+aitutor/
 
 .env.local
 .env.development.local

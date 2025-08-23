@@ -15,6 +15,14 @@ import uvicorn
 from manim import *
 print("✅ Manim imported successfully")
 
+# Apply TeX patches to fix math mode issues
+try:
+    from tex_patch import apply_tex_patches
+    tex_patches_applied = apply_tex_patches()
+    print(f"📝 TeX patches {'applied successfully' if tex_patches_applied else 'failed to apply'}")
+except ImportError:
+    print("⚠️ tex_patch module not found, skipping TeX patches")
+
 # TTS imports
 from gtts import gTTS
 
@@ -88,7 +96,25 @@ class VideoResponse(BaseModel):
 class MathAnimationScene(Scene):
     def __init__(self, katex_content: str, tts_script: str = "", **kwargs):
         super().__init__(**kwargs)
-        self.katex_content = katex_content
+        try:
+            from latex_fixer import (
+                preprocess_latex_content,
+                fix_math_expressions,
+                wrap_text_with_math
+            )
+            # Extra fix for "Example: f(x) = \frac{1}{x}" pattern
+            if "Example:" in katex_content and "\\frac" in katex_content:
+                print("   🔍 Found 'Example:' with formula pattern - applying special fix")
+                katex_content = wrap_text_with_math(katex_content)
+            
+            # Preprocess LaTeX content first
+            self.katex_content = preprocess_latex_content(katex_content, skip_if_well_formatted=False)
+            self.katex_content = fix_math_expressions(self.katex_content)
+            print("   ✅ LaTeX content preprocessed with latex_fixer")
+        except ImportError:
+            print("   ⚠️ latex_fixer not available, using raw content")
+            self.katex_content = katex_content
+            
         self.tts_script = tts_script
         self.calculate_timing()
         
@@ -221,6 +247,45 @@ class MathAnimationScene(Scene):
                     if katex_step.startswith('\\text{'):
                         # Handle text annotations with different styling
                         math_obj = MathTex(katex_step, font_size=30, color=YELLOW)
+                    # Special handling for text+formula patterns
+                    elif "Example:" in katex_step or "Domain:" in katex_step or "Range:" in katex_step:
+                        # These are text with formulas that need to be wrapped in math mode
+                        # Create text and formula separately to avoid LaTeX errors
+                        import re
+                        
+                        # This is the safest approach - split into a text object and a math object
+                        if "Example:" in katex_step:
+                            text_obj = Tex("Example:", font_size=36, color=YELLOW)
+                            math_content = katex_step.replace("Example:", "").strip()
+                            math_obj = MathTex(math_content, font_size=36, color=WHITE)
+                            
+                            # Position them together
+                            text_obj.align_to(ORIGIN, RIGHT).shift(LEFT*0.5)
+                            math_obj.align_to(ORIGIN, LEFT).shift(RIGHT*0.5)
+                            
+                            # Group them
+                            group = VGroup(text_obj, math_obj).arrange(RIGHT, buff=0.2)
+                            group.move_to([0, current_y, 0])
+                            
+                            # Animate the appearance of this step with calculated timing
+                            self.play(Write(group), run_time=timing['animation_time'])
+                            
+                            # Store the group instead of individual object for space management
+                            previous_equations.append(group)
+                            
+                            # Skip the rest of the loop for this special case
+                            continue
+                        
+                        # For other cases, try the wrapper approach
+                        text_formula_pattern = re.match(r'([A-Za-z]+:)\s*(.*)', katex_step)
+                        if text_formula_pattern:
+                            text_part = text_formula_pattern.group(1)
+                            formula_part = text_formula_pattern.group(2)
+                            wrapped_step = f"\\text{{{text_part}}} {formula_part}"
+                            print(f"   🔄 Wrapped text with formula: '{text_part}' + formula")
+                            math_obj = MathTex(wrapped_step, font_size=36, color=WHITE)
+                        else:
+                            math_obj = MathTex(katex_step, font_size=36, color=WHITE)
                     else:
                         # Handle mathematical equations
                         math_obj = MathTex(katex_step, font_size=36, color=WHITE)
@@ -293,10 +358,21 @@ class MathAnimationScene(Scene):
         """
         # Try to import latex_fixer locally if available
         try:
-            from latex_fixer import fix_common_latex_errors, preprocess_latex_content
+            from latex_fixer import fix_common_latex_errors, preprocess_latex_content, wrap_text_with_math
             # Use the specialized LaTeX fixer first
             content = preprocess_latex_content(content)
             content = fix_common_latex_errors(content)
+            
+            # Special handling for the specific error case
+            if "Example: f(x) = \\frac{1}{x}" in content:
+                print("   🚨 Found exact error pattern 'Example: f(x) = \\frac{1}{x}'")
+                content = content.replace(
+                    "Example: f(x) = \\frac{1}{x}",
+                    "$\\text{Example: } f(x) = \\frac{1}{x}$"
+                )
+            elif "Domain: " in content or "Range: " in content or "Example:" in content:
+                print("   🔄 Applying text-with-formula fixes")
+                content = wrap_text_with_math(content)
         except ImportError:
             # Basic fixes if latex_fixer is not available
             pass
@@ -361,6 +437,14 @@ class MathAnimationScene(Scene):
             elif '\\begin{align*}' in step and '\\end{align}' in step:
                 step = step.replace('\\end{align}', '\\end{align*}')
         
+        # Handle common text+math patterns like "Example: f(x) = ..."
+        import re
+        text_formula_pattern = re.match(r'^([A-Za-z]+:)\s*(.*?)(\$|\\frac|\\begin|=)', step)
+        if text_formula_pattern and not step.startswith('\\text{'):
+            text_part = text_formula_pattern.group(1)  # Example:, Domain:, etc.
+            rest = step[len(text_part):]
+            step = f"\\text{{{text_part}}} {rest}"
+            
         return step
     
     def fix_latex_step(self, step: str) -> str:
@@ -505,7 +589,14 @@ class SlideAnimationScene(Scene):
 def execute_manim_python_code(manim_code: str, output_path: str, tts_script: str = "") -> bool:
     """Execute Python Manim code directly and render the scene"""
     try:
-        print("   🐍 Executing Python Manim code...")
+        print("\n🔍 Debugging Manim Code Input:")
+        print("=" * 50)
+        print(f"Code type: {type(manim_code)}")
+        print(f"Code length: {len(manim_code)}")
+        print("Code preview:")
+        print("-" * 50)
+        print(manim_code[:500] + "..." if len(manim_code) > 500 else manim_code)
+        print("=" * 50)
         
         # Configure Manim
         from manim import config as manim_config
@@ -517,30 +608,58 @@ def execute_manim_python_code(manim_code: str, output_path: str, tts_script: str
         # Clean up the code
         cleaned_code = manim_code.strip()
         
-        # Import and use the LaTeX preprocessor
-        from latex_fixer import fix_common_latex_errors, preprocess_latex_content
+        # Check if code is already well-formatted (contains proper LaTeX syntax)
+        is_well_formatted = any([
+            "\\forall x_{" in cleaned_code,
+            "\\implies x_{" in cleaned_code,
+            "MathTex(r\"" in cleaned_code and "\\\\begin{cases}" in cleaned_code,
+            "self.play(Write(" in cleaned_code and "self.wait(" in cleaned_code,
+            "\\\\frac" in cleaned_code and "\\\\begin{align}" in cleaned_code
+        ])
         
-        # Apply LaTeX preprocessing
-        print("   🧹 Preprocessing LaTeX content...")
+        # Import LaTeX preprocessor tools
         try:
-            cleaned_code = fix_common_latex_errors(cleaned_code)
+            from latex_fixer import fix_common_latex_errors, preprocess_latex_content, is_well_formatted_latex
             
-            # Additional sanitization for $x = 2$ style inputs that might be causing issues
-            if '$' in cleaned_code:
-                print("   🔍 Detected dollar sign math delimiters, ensuring they're properly formatted")
-                # Replace all standalone math expressions with MathTex
-                import re
-                dollar_math = re.findall(r'\$(.*?)\$', cleaned_code)
-                for math in dollar_math:
-                    if len(math.strip()) > 0:
-                        # Check if this is already inside a MathTex
-                        if not re.search(r'MathTex\([\'"][^\'"]*' + re.escape(math) + r'[^\'"]*[\'"]\)', cleaned_code):
-                            # Replace with proper MathTex
-                            cleaned_code = cleaned_code.replace(
-                                f"${math}$", 
-                                f'MathTex(r"{math}")'
-                            )
-                            print(f"   🔄 Converted ${math}$ to MathTex")
+            if is_well_formatted:
+                print("   ✅ Code appears well-formatted, skipping heavy LaTeX preprocessing")
+                # Only do minimal fixes if code looks well-formatted
+                if '$' in cleaned_code:
+                    # Still fix dollar signs as Manim doesn't use them
+                    print("   🔍 Fixing dollar sign math delimiters...")
+                    import re
+                    cleaned_code = re.sub(r'\$(.*?)\$', r'\1', cleaned_code)
+            else:
+                print("   🧹 Preprocessing LaTeX content...")
+        
+            # Apply appropriate level of preprocessing based on whether code looks well-formatted
+            if is_well_formatted:
+                # Only do minimal fixes if code looks well-formatted
+                if '$' in cleaned_code:
+                    print("   🔍 Fixing dollar sign math delimiters...")
+                    import re
+                    cleaned_code = re.sub(r'\$(.*?)\$', r'\1', cleaned_code)
+            else:
+                # Do more aggressive preprocessing for poorly formatted code
+                cleaned_code = preprocess_latex_content(cleaned_code, skip_if_well_formatted=True)
+                cleaned_code = fix_common_latex_errors(cleaned_code)
+                
+                # Additional sanitization for $x = 2$ style inputs that might be causing issues
+                if '$' in cleaned_code:
+                    print("   🔍 Detected dollar sign math delimiters, ensuring they're properly formatted")
+                    # Replace all standalone math expressions with MathTex
+                    import re
+                    dollar_math = re.findall(r'\$(.*?)\$', cleaned_code)
+                    for math in dollar_math:
+                        if len(math.strip()) > 0:
+                            # Check if this is already inside a MathTex
+                            if not re.search(r'MathTex\([\'"][^\'"]*' + re.escape(math) + r'[^\'"]*[\'"]\)', cleaned_code):
+                                # Replace with proper MathTex
+                                cleaned_code = cleaned_code.replace(
+                                    f"${math}$", 
+                                    f'MathTex(r"{math}")'
+                                )
+                                print(f"   🔄 Converted ${math}$ to MathTex")
             
             print("   ✅ LaTeX preprocessing completed")
         except Exception as latex_error:
@@ -899,7 +1018,10 @@ def generate_math_video(answer_data: Dict, output_path: str) -> bool:
         print("   🎥 Processing Manim code...")
         
         # Check if it's Python code or LaTeX content
-        if manim_code.strip().startswith('from manim import') or manim_code.strip().startswith('class '):
+        if (manim_code.strip().startswith('from manim import') or 
+            manim_code.strip().startswith('class ') or
+            'def construct(self):' in manim_code or
+            'Scene):' in manim_code):
             # It's Python code - execute it directly
             print("   🐍 Detected Python Manim code, executing directly...")
             return execute_manim_python_code(manim_code, output_path, tts_script)
